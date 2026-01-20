@@ -6,6 +6,7 @@ version: 0.2
 env:
   variables:
     DOCKER_BUILDKIT: "1"
+    COPILOT_ENVIRONMENT_NAME: "dev"
 
 phases:
   install:
@@ -24,12 +25,15 @@ phases:
       - echo "Logging in to Amazon ECR..."
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - echo "Pre-build phase complete"
+      - echo "Workspace contents:"
+      - ls -la
+      - cat copilot/.workspace || echo "No .workspace file"
 
   build:
     commands:
-      - echo "Building and deploying Frank..."
+      - echo "Building and deploying Frank to env=$COPILOT_ENVIRONMENT_NAME..."
       - echo "Build started on $(date)"
-      - copilot svc deploy -n frank -e $COPILOT_ENVIRONMENT_NAME --tag $CODEBUILD_RESOLVED_SOURCE_VERSION
+      - copilot svc deploy -n frank -e $COPILOT_ENVIRONMENT_NAME --tag ${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
 
   post_build:
     commands:
