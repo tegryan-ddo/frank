@@ -3,7 +3,6 @@
 /frank.exe
 /frank-*
 *.exe
-!copilot/
 
 # Build artifacts
 dist/
