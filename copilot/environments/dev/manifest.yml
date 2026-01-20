@@ -21,7 +21,7 @@ network:
 http:
   public:
     certificates:
-      - arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERTIFICATE_ID
+      - arn:aws:acm:us-east-1:882384879235:certificate/772d185a-9f1f-43d8-b20f-5c82c11f1b01
     # Optional: restrict access by IP
     # ingress:
     #   restrict_ip:
