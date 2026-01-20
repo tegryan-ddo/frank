@@ -8,7 +8,7 @@ source:
   provider: GitHub
   properties:
     branch: main
-    repository: https://github.com/tegryan-ddo/enkai
+    repository: https://github.com/tegryan-ddo/frank
     # connection_name will be created during pipeline init
 
 build:
