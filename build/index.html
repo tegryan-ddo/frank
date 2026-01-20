@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frank - Claude Code Terminal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            overflow: hidden;
+            height: 100%;
+            width: 100%;
+        }
+
+        /* Hide scrollbars globally */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+        * {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #252526;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .header h1 {
+            font-size: 14px;
+            font-weight: 500;
+            color: #cccccc;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+        }
+
+        .tab {
+            padding: 6px 12px;
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            background: #3c3c3c;
+            color: #ffffff;
+        }
+
+        .tab.active {
+            background: #0e639c;
+            border-color: #0e639c;
+            color: #ffffff;
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .terminals-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .pane.hidden {
+            display: none;
+        }
+
+        .pane-header {
+            background: #2d2d2d;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #9d9d9d;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pane-header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #6a9955;
+        }
+
+        .divider-h {
+            height: 4px;
+            background: #3c3c3c;
+            cursor: row-resize;
+            flex-shrink: 0;
+        }
+
+        .divider-h:hover {
+            background: #0e639c;
+        }
+
+        iframe {
+            flex: 1;
+            border: none;
+            background: #1e1e1e;
+            overflow: hidden;
+        }
+
+        /* Layout modes */
+        .terminals-wrapper.split .pane { flex: 1; }
+        .terminals-wrapper.claude-only .pane.bash { display: none; }
+        .terminals-wrapper.claude-only .divider-h { display: none; }
+        .terminals-wrapper.bash-only .pane.claude { display: none; }
+        .terminals-wrapper.bash-only .divider-h { display: none; }
+
+        /* Context Panel - always visible */
+        .context-panel {
+            width: 280px;
+            background: #252526;
+            border-left: 1px solid #3c3c3c;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .context-panel-header {
+            background: #2d2d2d;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #cccccc;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .context-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            scrollbar-width: thin;
+            scrollbar-color: #3c3c3c #252526;
+        }
+
+        .context-panel-content::-webkit-scrollbar {
+            display: block;
+            width: 6px;
+        }
+
+        .context-panel-content::-webkit-scrollbar-track {
+            background: #252526;
+        }
+
+        .context-panel-content::-webkit-scrollbar-thumb {
+            background: #3c3c3c;
+            border-radius: 3px;
+        }
+
+        .context-panel-content::-webkit-scrollbar-thumb:hover {
+            background: #4c4c4c;
+        }
+
+        .context-section {
+            margin-bottom: 16px;
+        }
+
+        .context-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #9d9d9d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .context-usage-bar {
+            height: 20px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 4px;
+        }
+
+        .context-usage-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6a9955, #4ec9b0);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+        }
+
+        .context-usage-fill.warning {
+            background: linear-gradient(90deg, #dcdcaa, #ce9178);
+        }
+
+        .context-usage-fill.error {
+            background: linear-gradient(90deg, #f44747, #d16969);
+        }
+
+        .context-usage-text {
+            font-size: 10px;
+            color: #1e1e1e;
+            font-weight: 600;
+        }
+
+        .context-usage-details {
+            font-size: 11px;
+            color: #9d9d9d;
+            text-align: right;
+        }
+
+        .context-file-list {
+            list-style: none;
+        }
+
+        .context-file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 8px;
+            margin-bottom: 2px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .context-file-item:hover {
+            background: #2d2d2d;
+        }
+
+        .context-file-name {
+            color: #4ec9b0;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .context-tool-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            margin-bottom: 2px;
+            font-size: 11px;
+        }
+
+        .context-tool-name {
+            color: #dcdcaa;
+        }
+
+        .context-tool-count {
+            color: #9d9d9d;
+            background: #3c3c3c;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+
+        .context-empty {
+            color: #6d6d6d;
+            font-size: 11px;
+            font-style: italic;
+            text-align: center;
+            padding: 12px;
+        }
+
+        .context-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 11px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .context-stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .context-stat-label {
+            color: #9d9d9d;
+        }
+
+        .context-stat-value {
+            color: #cccccc;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .context-status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #6a9955;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .context-status-indicator.warning {
+            background: #dcdcaa;
+        }
+
+        .context-status-indicator.error {
+            background: #f44747;
+        }
+
+        .context-model-badge {
+            background: #0e639c;
+            color: #ffffff;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .context-panel-header-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Frank</h1>
+        <div class="tabs">
+            <button class="tab active" data-view="split">Split View</button>
+            <button class="tab" data-view="claude-only">Claude Only</button>
+            <button class="tab" data-view="bash-only">Bash Only</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- Terminals (stacked vertically) -->
+        <div class="terminals-wrapper split" id="terminals-wrapper">
+            <div class="pane claude">
+                <div class="pane-header">
+                    <span class="dot"></span>
+                    Claude Code
+                </div>
+                <iframe id="claude-frame" src="CLAUDE_URL" scrolling="no"></iframe>
+            </div>
+
+            <div class="divider-h" id="divider"></div>
+
+            <div class="pane bash">
+                <div class="pane-header">
+                    <span class="dot"></span>
+                    Bash Terminal
+                </div>
+                <iframe id="bash-frame" src="BASH_URL" scrolling="no"></iframe>
+            </div>
+        </div>
+
+        <!-- Context Panel (always visible) -->
+        <div class="context-panel" id="context-panel">
+            <div class="context-panel-header">
+                <div class="context-panel-header-status">
+                    <span class="context-status-indicator" id="status-indicator"></span>
+                    <span id="status-text">Connected</span>
+                </div>
+                <span class="context-model-badge" id="model-name">-</span>
+            </div>
+            <div class="context-panel-content">
+                <!-- Context Usage Section -->
+                <div class="context-section">
+                    <div class="context-section-title">Context Window</div>
+                    <div class="context-usage-bar">
+                        <div class="context-usage-fill" id="context-usage-fill" style="width: 0%">
+                            <span class="context-usage-text" id="context-usage-pct">-</span>
+                        </div>
+                    </div>
+                    <div class="context-usage-details" id="context-usage-detail">Waiting for data...</div>
+                    <div class="context-info-note" id="context-info-note" style="display: none; margin-top: 8px; padding: 8px; background: #1e1e1e; border-radius: 4px; font-size: 10px; color: #808080;">
+                        Session data is stored server-side. Use /context in Claude for live stats.
+                    </div>
+                </div>
+
+                <!-- Stats Section -->
+                <div class="context-section">
+                    <div class="context-section-title">Session Stats</div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Input Tokens</span>
+                        <span class="context-stat-value" id="ctx-tokens-in">0</span>
+                    </div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Output Tokens</span>
+                        <span class="context-stat-value" id="ctx-tokens-out">0</span>
+                    </div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Cache Read</span>
+                        <span class="context-stat-value" id="ctx-cache-read">0</span>
+                    </div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Cache Created</span>
+                        <span class="context-stat-value" id="ctx-cache-create">0</span>
+                    </div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Messages</span>
+                        <span class="context-stat-value" id="ctx-messages">0</span>
+                    </div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Turns</span>
+                        <span class="context-stat-value" id="ctx-turns">0</span>
+                    </div>
+                    <div class="context-stat-row">
+                        <span class="context-stat-label">Total Cost</span>
+                        <span class="context-stat-value" id="ctx-cost">$0.00</span>
+                    </div>
+                </div>
+
+                <!-- Tool Usage Section -->
+                <div class="context-section">
+                    <div class="context-section-title">Tool Usage</div>
+                    <div id="tool-usage-list">
+                        <div class="context-empty">No tools used yet</div>
+                    </div>
+                </div>
+
+                <!-- Files Section -->
+                <div class="context-section">
+                    <div class="context-section-title">Files in Context</div>
+                    <ul class="context-file-list" id="context-file-list">
+                        <li class="context-empty">No files detected</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Storage key for preferences (shared across all instances)
+        const STORAGE_KEY = 'frank-layout-prefs';
+
+        // Load saved preferences
+        function loadPreferences() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    return JSON.parse(saved);
+                }
+            } catch (e) {
+                console.warn('Failed to load preferences:', e);
+            }
+            return { view: 'split', splitRatio: 50 };
+        }
+
+        // Save preferences
+        function savePreferences(prefs) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+            } catch (e) {
+                console.warn('Failed to save preferences:', e);
+            }
+        }
+
+        // Initialize from saved preferences
+        const prefs = loadPreferences();
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                const wrapper = document.getElementById('terminals-wrapper');
+                wrapper.className = 'terminals-wrapper ' + tab.dataset.view;
+
+                // Save view preference
+                prefs.view = tab.dataset.view;
+                savePreferences(prefs);
+            });
+        });
+
+        // Restore saved view mode
+        if (prefs.view) {
+            const targetTab = document.querySelector(`.tab[data-view="${prefs.view}"]`);
+            if (targetTab) {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                targetTab.classList.add('active');
+                document.getElementById('terminals-wrapper').className = 'terminals-wrapper ' + prefs.view;
+            }
+        }
+
+        // Resizable divider (horizontal)
+        const divider = document.getElementById('divider');
+        const wrapper = document.getElementById('terminals-wrapper');
+        const claudePane = document.querySelector('.pane.claude');
+        const bashPane = document.querySelector('.pane.bash');
+
+        let isResizing = false;
+
+        // Restore saved split ratio
+        if (prefs.splitRatio && prefs.splitRatio > 20 && prefs.splitRatio < 80) {
+            claudePane.style.flex = prefs.splitRatio;
+            bashPane.style.flex = 100 - prefs.splitRatio;
+        }
+
+        divider.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+
+            const wrapperRect = wrapper.getBoundingClientRect();
+            const percentage = ((e.clientY - wrapperRect.top) / wrapperRect.height) * 100;
+
+            if (percentage > 20 && percentage < 80) {
+                claudePane.style.flex = percentage;
+                bashPane.style.flex = 100 - percentage;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                // Save the split ratio when done resizing
+                const claudeFlex = parseFloat(claudePane.style.flex) || 50;
+                prefs.splitRatio = claudeFlex;
+                savePreferences(prefs);
+            }
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+
+        // Status polling
+        // Calculate status URL dynamically from current port
+        // Web view is on port X, status is on port X+3
+        const currentPort = parseInt(window.location.port) || 80;
+        const statusPort = currentPort + 3;
+        const STATUS_URL = `http://${window.location.hostname}:${statusPort}/status`;
+        console.log('Calculated STATUS_URL from port', currentPort, '->', STATUS_URL);
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        function updateStatus(data) {
+            const indicator = document.getElementById('status-indicator');
+            const statusText = document.getElementById('status-text');
+
+            if (data.error) {
+                indicator.className = 'context-status-indicator error';
+                statusText.textContent = 'Error';
+                return;
+            }
+
+            // Update model
+            if (data.model) {
+                document.getElementById('model-name').textContent = data.model;
+            } else {
+                document.getElementById('model-name').textContent = 'Sonnet';
+            }
+
+            // Check if Claude process is running
+            if (data.connected === false) {
+                indicator.className = 'context-status-indicator error';
+                statusText.textContent = 'Not Running';
+                updateContextPanel(data);
+                return;
+            }
+
+            // Update indicator based on context usage
+            if (data.context_used && data.context_max) {
+                const usage = data.context_used / data.context_max;
+
+                if (usage > 0.9) {
+                    indicator.className = 'context-status-indicator error';
+                    statusText.textContent = 'Context High';
+                } else if (usage > 0.7) {
+                    indicator.className = 'context-status-indicator warning';
+                    statusText.textContent = 'Context Warning';
+                } else {
+                    indicator.className = 'context-status-indicator';
+                    statusText.textContent = 'Connected';
+                }
+            } else {
+                indicator.className = 'context-status-indicator';
+                statusText.textContent = 'Connected';
+            }
+
+            // Update the context panel with all data
+            updateContextPanel(data);
+        }
+
+        // Context Panel Update
+        function updateContextPanel(data) {
+            const usageFill = document.getElementById('context-usage-fill');
+            const usagePct = document.getElementById('context-usage-pct');
+            const usageDetail = document.getElementById('context-usage-detail');
+
+            // Context window may not be available (data is server-side in newer Claude Code)
+            const contextMax = data.context_max || 200000;
+            if (data.context_used && contextMax) {
+                const pct = Math.min(100, (data.context_used / contextMax) * 100);
+                usageFill.style.width = pct + '%';
+                usagePct.textContent = pct.toFixed(1) + '%';
+                usageDetail.textContent = formatNumber(data.context_used) + ' / ' + formatNumber(contextMax) + ' tokens';
+
+                usageFill.classList.remove('warning', 'error');
+                if (pct > 90) {
+                    usageFill.classList.add('error');
+                } else if (pct > 70) {
+                    usageFill.classList.add('warning');
+                }
+            } else {
+                // No context data available - show as N/A
+                usageFill.style.width = '0%';
+                usagePct.textContent = '-';
+                usageDetail.textContent = 'Data not available locally';
+                usageFill.classList.remove('warning', 'error');
+                // Show the info note
+                const infoNote = document.getElementById('context-info-note');
+                if (infoNote) infoNote.style.display = 'block';
+            }
+
+            // Update stats - show dash for unavailable data (handle 0 as valid)
+            document.getElementById('ctx-tokens-in').textContent = data.tokens_in != null ? formatNumber(data.tokens_in) : '-';
+            document.getElementById('ctx-tokens-out').textContent = data.tokens_out != null ? formatNumber(data.tokens_out) : '-';
+            document.getElementById('ctx-cache-read').textContent = data.cache_read != null ? formatNumber(data.cache_read) : '-';
+            document.getElementById('ctx-cache-create').textContent = data.cache_creation != null ? formatNumber(data.cache_creation) : '-';
+            document.getElementById('ctx-messages').textContent = data.message_count != null ? data.message_count : '-';
+            document.getElementById('ctx-turns').textContent = data.turn_count != null ? data.turn_count : '-';
+            document.getElementById('ctx-cost').textContent = data.cost != null ? '$' + data.cost.toFixed(2) : '-';
+
+            // Update tool usage
+            const toolList = document.getElementById('tool-usage-list');
+            if (data.tool_uses && Object.keys(data.tool_uses).length > 0) {
+                toolList.innerHTML = Object.entries(data.tool_uses)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([name, count]) => `
+                        <div class="context-tool-item">
+                            <span class="context-tool-name">${escapeHtml(name)}</span>
+                            <span class="context-tool-count">${count}</span>
+                        </div>
+                    `).join('');
+            } else {
+                toolList.innerHTML = '<div class="context-empty">No tools used yet</div>';
+            }
+
+            // Update files list
+            const fileList = document.getElementById('context-file-list');
+            if (data.files_in_context && data.files_in_context.length > 0) {
+                fileList.innerHTML = data.files_in_context
+                    .map(file => {
+                        const shortPath = file.split('/').slice(-2).join('/');
+                        return `
+                            <li class="context-file-item">
+                                <span class="context-file-name" title="${escapeHtml(file)}">${escapeHtml(shortPath)}</span>
+                            </li>
+                        `;
+                    }).join('');
+            } else {
+                fileList.innerHTML = '<li class="context-empty">No files detected</li>';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function pollStatus() {
+            try {
+                // Use detailed endpoint for more data
+                const detailedUrl = STATUS_URL.replace('/status', '/status/detailed');
+                console.log('Polling:', detailedUrl);
+                const response = await fetch(detailedUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Status data:', data);
+                    updateStatus(data);
+                } else {
+                    console.warn('Status response not ok:', response.status);
+                }
+            } catch (e) {
+                console.warn('Detailed fetch failed:', e.message);
+                // Fallback to basic status
+                try {
+                    const response = await fetch(STATUS_URL);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('Basic status data:', data);
+                        updateStatus(data);
+                    }
+                } catch (e2) {
+                    console.warn('Basic fetch failed:', e2.message);
+                    // Show error state
+                    updateStatus({ error: true, connected: false });
+                }
+            }
+        }
+
+        // Poll every 5 seconds - URL is now calculated dynamically
+        console.log('Starting status polling to:', STATUS_URL);
+        pollStatus();
+        setInterval(pollStatus, 5000);
+    </script>
+</body>
+</html>

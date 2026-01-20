@@ -1,0 +1,105 @@
+# Frank CLI Configuration
+# Copy to ~/.config/frank/config.yaml (Linux/macOS) or %APPDATA%\frank\config.yaml (Windows)
+
+version: "1.0"
+
+# Container runtime settings
+runtime:
+  # Preferred runtime: auto, docker, podman, orbstack
+  # Auto will detect in order: OrbStack (macOS), Docker, Podman
+  preferred: auto
+  # Timeout for runtime operations
+  timeout: 30s
+
+# Default container settings
+container:
+  # Base image for containers
+  image: frank-dev:latest
+  # Port range for ttyd web terminals
+  basePort: 8080
+  maxPort: 8180
+  # Mount point for workspace in container
+  workspaceMount: /workspace
+
+# AWS settings
+aws:
+  # Default AWS profile (empty means require explicit --profile)
+  defaultProfile: ""
+  # Automatically run 'aws sso login' if credentials are expired
+  autoLogin: true
+  # Refresh credentials if expiring within this duration
+  credentialRefreshBuffer: 5m
+
+# Claude Code settings
+claude:
+  # Environment variable containing the Claude access token
+  tokenEnvVar: CLAUDE_ACCESS_TOKEN
+
+# Notification settings
+notifications:
+  # Enable desktop notifications
+  enabled: true
+  # Cooldown between notifications to prevent spam
+  cooldown: 30s
+  # Play sound with notifications
+  sound: true
+  # Notify after this much inactivity when Claude might be waiting
+  inactivityTimeout: 30s
+  # Patterns to detect Claude prompts
+  patterns:
+    # Lines ending with question mark
+    questions:
+      - "\\?$"
+    # Keywords that suggest Claude is waiting
+    keywords:
+      - "continue"
+      - "approve"
+      - "proceed"
+      - "waiting"
+      - "input"
+      - "response"
+      - "confirm"
+      - "permission"
+    # Common prompt patterns
+    prompts:
+      - "\\[Y/n\\]"
+      - "\\(yes/no\\)"
+      - "Press Enter"
+      - "Do you want"
+      - "Should I"
+      - "Would you like"
+
+# MCP (Model Context Protocol) server settings
+mcp:
+  # Directory for MCP configuration files
+  configDir: ~/.config/frank/mcp
+  # MCP servers to enable in containers
+  servers:
+    - name: context7
+      enabled: true
+    - name: sequential-thinking
+      enabled: true
+    - name: aws-documentation
+      enabled: true
+    - name: aws-knowledge
+      enabled: true
+    - name: aws-core
+      enabled: true
+
+# Git settings
+git:
+  # Base directory for git worktrees
+  worktreeBase: ~/.frank/worktrees
+  # Clean up worktrees when stopping containers
+  cleanupOnStop: true
+  # Auto-commit message when stopping containers
+  autoCommitMessage: "WIP: Auto-save before container stop"
+
+# Logging settings
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+  # Verbose output (same as -v flag)
+  verbose: false
+  # Log file path (empty means stderr only)
+  file: ""

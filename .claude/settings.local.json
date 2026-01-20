@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.frank.exe --help)",
+      "Bash(\"c:/Users/barff/Documents/autoclauto/frank.exe\" --help)",
+      "Bash(\"c:/Users/barff/Documents/autoclauto/frank.exe\" list --help)",
+      "Bash(powershell -ExecutionPolicy Bypass -File build.ps1:*)",
+      "Bash(docker build:*)",
+      "Bash(\"c:/Users/barff/Documents/autoclauto/frank.exe\" list)",
+      "Bash(podman --version:*)",
+      "Bash(git -C \"C:/Users/barff/Documents/enki\" worktree prune:*)",
+      "Bash(powershell.exe -Command \"git -C ''C:/Users/barff/Documents/enki'' worktree prune; git -C ''C:/Users/barff/Documents/enki'' worktree list\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:/Users/barff/Documents'' -Directory | Select-Object -ExpandProperty Name\")",
+      "Bash(powershell.exe -Command \"Test-Path ''C:/Users/barff/enki''\")",
+      "Bash(powershell.exe -Command \"git -C ''C:/Users/barff/enki'' worktree prune; git -C ''C:/Users/barff/enki'' worktree list\")",
+      "Bash(powershell.exe:*)",
+      "Bash(cat:*)",
+      "Bash(./frank.exe start:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+# Binaries
+frank
+frank.exe
+frank-*
+*.exe
+
+# Build artifacts
+dist/
+bin/
+
+# Test coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Config files with secrets
+config.yaml
+*.local.yaml
+
+# Log files
+*.log

@@ -1,0 +1,557 @@
+package cmd
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/barff/frank/internal/aws"
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+)
+
+var authCmd = &cobra.Command{
+	Use:   "auth",
+	Short: "Manage authentication for frank containers",
+	Long:  `Configure authentication credentials that will be passed to frank containers.`,
+}
+
+var authGitHubCmd = &cobra.Command{
+	Use:   "github",
+	Short: "Configure GitHub authentication",
+	Long: `Configure GitHub authentication for frank containers.
+
+You can provide a GitHub Personal Access Token (PAT) which will be stored
+securely and passed to containers automatically.
+
+To create a token:
+  1. Go to https://github.com/settings/tokens
+  2. Click "Generate new token (classic)"
+  3. Select scopes: repo, read:org, workflow
+  4. Copy the token
+
+Alternatively, if you're already logged in with 'gh auth login', frank will
+automatically mount your GitHub CLI config.`,
+	RunE: runAuthGitHub,
+}
+
+var authStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show authentication status",
+	RunE:  runAuthStatus,
+}
+
+var authClaudeCmd = &cobra.Command{
+	Use:   "claude",
+	Short: "Configure Claude authentication",
+	Long: `Configure Claude authentication for frank containers.
+
+You can provide a Claude access token which will be stored securely and
+passed to containers automatically.
+
+To get your token:
+  1. Run 'claude' in your terminal
+  2. Complete the browser authentication
+  3. The token is stored at ~/.claude/.credentials.json
+
+Alternatively, set the CLAUDE_ACCESS_TOKEN environment variable.`,
+	RunE: runAuthClaude,
+}
+
+var authAWSCmd = &cobra.Command{
+	Use:   "aws [profile]",
+	Short: "Generate temporary AWS credentials",
+	Long: `Generate temporary AWS credentials from an SSO profile.
+
+This command exports temporary AWS credentials that can be used in environments
+that don't support AWS SSO directly. The credentials are short-lived and will
+need to be refreshed periodically.
+
+Output formats:
+  --format env      Environment variable format (default)
+  --format export   Shell export statements (copy/paste ready)
+  --format json     JSON format for programmatic use
+  --format powershell  PowerShell $env: format
+
+Examples:
+  frank auth aws dev                    # Show credentials for 'dev' profile
+  frank auth aws dev --format export    # Get export statements
+  frank auth aws dev --format json      # Get JSON output
+  eval $(frank auth aws dev --format export)  # Set in current shell`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runAuthAWS,
+}
+
+var (
+	authGitHubToken  string
+	authGitHubClear  bool
+	authClaudeToken  string
+	authClaudeClear  bool
+	authAWSFormat    string
+	authAWSLogin     bool
+)
+
+func init() {
+	rootCmd.AddCommand(authCmd)
+	authCmd.AddCommand(authGitHubCmd)
+	authCmd.AddCommand(authClaudeCmd)
+	authCmd.AddCommand(authStatusCmd)
+	authCmd.AddCommand(authAWSCmd)
+
+	authGitHubCmd.Flags().StringVarP(&authGitHubToken, "token", "t", "", "GitHub Personal Access Token")
+	authGitHubCmd.Flags().BoolVar(&authGitHubClear, "clear", false, "Clear stored GitHub token")
+
+	authClaudeCmd.Flags().StringVarP(&authClaudeToken, "token", "t", "", "Claude access token")
+	authClaudeCmd.Flags().BoolVar(&authClaudeClear, "clear", false, "Clear stored Claude token")
+
+	authAWSCmd.Flags().StringVar(&authAWSFormat, "format", "env", "Output format: env, export, json, powershell")
+	authAWSCmd.Flags().BoolVar(&authAWSLogin, "login", false, "Perform SSO login if credentials are expired")
+}
+
+func runAuthGitHub(cmd *cobra.Command, args []string) error {
+	tokenFile := getAuthTokenFile("github")
+
+	if authGitHubClear {
+		if err := os.Remove(tokenFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear token: %w", err)
+		}
+		fmt.Println("GitHub token cleared.")
+		return nil
+	}
+
+	token := authGitHubToken
+
+	// If no token provided, prompt for it
+	if token == "" {
+		// Check if already set via environment
+		if envToken := os.Getenv("GH_TOKEN"); envToken != "" {
+			fmt.Println("GH_TOKEN environment variable is already set.")
+			fmt.Print("Store it for future sessions? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				token = envToken
+			} else {
+				return nil
+			}
+		} else if envToken := os.Getenv("GITHUB_TOKEN"); envToken != "" {
+			fmt.Println("GITHUB_TOKEN environment variable is already set.")
+			fmt.Print("Store it for future sessions? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				token = envToken
+			} else {
+				return nil
+			}
+		} else {
+			fmt.Println("Enter your GitHub Personal Access Token:")
+			fmt.Println("(Create one at https://github.com/settings/tokens)")
+			fmt.Print("> ")
+			reader := bufio.NewReader(os.Stdin)
+			token, _ = reader.ReadString('\n')
+			token = strings.TrimSpace(token)
+		}
+	}
+
+	if token == "" {
+		return fmt.Errorf("no token provided")
+	}
+
+	// Validate token format (basic check)
+	if !strings.HasPrefix(token, "ghp_") && !strings.HasPrefix(token, "github_pat_") && !strings.HasPrefix(token, "gho_") {
+		fmt.Println(color.YellowString("Warning: Token doesn't match expected GitHub token format."))
+		fmt.Println("Expected prefixes: ghp_, github_pat_, or gho_")
+	}
+
+	// Store token
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0700); err != nil {
+		return fmt.Errorf("failed to create auth directory: %w", err)
+	}
+
+	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
+		return fmt.Errorf("failed to store token: %w", err)
+	}
+
+	fmt.Printf("%s GitHub token stored successfully.\n", color.GreenString("✓"))
+	fmt.Println("This token will be passed to all frank containers.")
+	return nil
+}
+
+func runAuthClaude(cmd *cobra.Command, args []string) error {
+	tokenFile := getAuthTokenFile("claude")
+
+	if authClaudeClear {
+		if err := os.Remove(tokenFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear token: %w", err)
+		}
+		fmt.Println("Claude token cleared.")
+		return nil
+	}
+
+	token := authClaudeToken
+
+	// If no token provided, try to find it or prompt
+	if token == "" {
+		// Check environment variable
+		if envToken := os.Getenv("CLAUDE_ACCESS_TOKEN"); envToken != "" {
+			fmt.Println("CLAUDE_ACCESS_TOKEN environment variable is set.")
+			fmt.Print("Store it for future sessions? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				token = envToken
+			} else {
+				return nil
+			}
+		} else if credToken := getClaudeCredentialsToken(); credToken != "" {
+			// Found token in Claude's credentials file
+			fmt.Println("Found token in Claude credentials file.")
+			fmt.Print("Store it for frank? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				token = credToken
+			} else {
+				return nil
+			}
+		} else {
+			fmt.Println("Enter your Claude access token:")
+			fmt.Println("(Run 'claude' to authenticate and get your token from ~/.claude/.credentials.json)")
+			fmt.Print("> ")
+			reader := bufio.NewReader(os.Stdin)
+			token, _ = reader.ReadString('\n')
+			token = strings.TrimSpace(token)
+		}
+	}
+
+	if token == "" {
+		return fmt.Errorf("no token provided")
+	}
+
+	// Store token
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0700); err != nil {
+		return fmt.Errorf("failed to create auth directory: %w", err)
+	}
+
+	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
+		return fmt.Errorf("failed to store token: %w", err)
+	}
+
+	fmt.Printf("%s Claude token stored successfully.\n", color.GreenString("✓"))
+	fmt.Println("This token will be passed to all frank containers.")
+	return nil
+}
+
+func runAuthStatus(cmd *cobra.Command, args []string) error {
+	fmt.Println("Authentication Status:")
+	fmt.Println()
+
+	// Check Claude
+	fmt.Print("Claude: ")
+	if token := getStoredClaudeToken(); token != "" {
+		masked := maskToken(token)
+		fmt.Printf("%s (stored: %s)\n", color.GreenString("configured"), masked)
+	} else if token := os.Getenv("CLAUDE_ACCESS_TOKEN"); token != "" {
+		fmt.Printf("%s (from CLAUDE_ACCESS_TOKEN env)\n", color.GreenString("configured"))
+	} else if token := getClaudeCredentialsToken(); token != "" {
+		fmt.Printf("%s (from ~/.claude credentials)\n", color.GreenString("configured"))
+	} else {
+		fmt.Printf("%s\n", color.YellowString("not configured"))
+	}
+
+	// Check GitHub
+	fmt.Print("GitHub: ")
+	if token := getStoredGitHubToken(); token != "" {
+		masked := maskToken(token)
+		fmt.Printf("%s (stored: %s)\n", color.GreenString("configured"), masked)
+	} else if token := os.Getenv("GH_TOKEN"); token != "" {
+		fmt.Printf("%s (from GH_TOKEN env)\n", color.GreenString("configured"))
+	} else if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		fmt.Printf("%s (from GITHUB_TOKEN env)\n", color.GreenString("configured"))
+	} else if ghConfigExists() {
+		fmt.Printf("%s (gh CLI config available)\n", color.GreenString("configured"))
+	} else {
+		fmt.Printf("%s\n", color.YellowString("not configured"))
+	}
+
+	// Check SSH
+	fmt.Print("SSH:    ")
+	if sshKeyExists() {
+		fmt.Printf("%s (keys found in ~/.ssh)\n", color.GreenString("available"))
+	} else {
+		fmt.Printf("%s\n", color.YellowString("no keys found"))
+	}
+
+	// Check AWS
+	fmt.Print("AWS:    ")
+	if awsConfigExists() {
+		fmt.Printf("%s (~/.aws found)\n", color.GreenString("available"))
+	} else {
+		fmt.Printf("%s\n", color.YellowString("not configured"))
+	}
+
+	fmt.Println()
+	return nil
+}
+
+// getAuthTokenFile returns the path to store auth tokens
+func getAuthTokenFile(service string) string {
+	return filepath.Join(getHomeDir(), ".config", "frank", "auth", service+".token")
+}
+
+// getStoredGitHubToken reads the stored GitHub token
+func getStoredGitHubToken() string {
+	data, err := os.ReadFile(getAuthTokenFile("github"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// getStoredClaudeToken reads the stored Claude token
+func getStoredClaudeToken() string {
+	data, err := os.ReadFile(getAuthTokenFile("claude"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// getClaudeCredentialsToken reads Claude's credentials file
+func getClaudeCredentialsToken() string {
+	credFile := filepath.Join(getHomeDir(), ".claude", ".credentials.json")
+	data, err := os.ReadFile(credFile)
+	if err != nil {
+		return ""
+	}
+
+	// Try the nested claudeAiOauth structure first (current format)
+	var nestedCreds struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(data, &nestedCreds); err == nil && nestedCreds.ClaudeAiOauth.AccessToken != "" {
+		return nestedCreds.ClaudeAiOauth.AccessToken
+	}
+
+	// Fallback to flat structure (older format)
+	var flatCreds struct {
+		AccessToken string `json:"accessToken"`
+		Token       string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &flatCreds); err == nil {
+		if flatCreds.AccessToken != "" {
+			return flatCreds.AccessToken
+		}
+		return flatCreds.Token
+	}
+
+	return ""
+}
+
+// maskToken returns a masked version of a token for display
+func maskToken(token string) string {
+	if len(token) < 8 {
+		return "***"
+	}
+	return token[:4] + "..." + token[len(token)-4:]
+}
+
+// GetClaudeToken returns the Claude token from stored, env, or credentials
+func GetClaudeToken() string {
+	// Priority: stored token > CLAUDE_ACCESS_TOKEN > credentials file
+	if token := getStoredClaudeToken(); token != "" {
+		return token
+	}
+	if token := os.Getenv("CLAUDE_ACCESS_TOKEN"); token != "" {
+		return token
+	}
+	return getClaudeCredentialsToken()
+}
+
+// ghConfigExists checks if GitHub CLI config exists
+func ghConfigExists() bool {
+	ghConfigDir := filepath.Join(getHomeDir(), ".config", "gh")
+	if _, err := os.Stat(filepath.Join(ghConfigDir, "hosts.yml")); err == nil {
+		return true
+	}
+	return false
+}
+
+// sshKeyExists checks if SSH keys exist
+func sshKeyExists() bool {
+	sshDir := filepath.Join(getHomeDir(), ".ssh")
+	keys := []string{"id_rsa", "id_ed25519", "id_ecdsa"}
+	for _, key := range keys {
+		if _, err := os.Stat(filepath.Join(sshDir, key)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// awsConfigExists checks if AWS config exists
+func awsConfigExists() bool {
+	awsDir := filepath.Join(getHomeDir(), ".aws")
+	if _, err := os.Stat(awsDir); err == nil {
+		return true
+	}
+	return false
+}
+
+// GetGitHubToken returns the GitHub token from stored or environment
+func GetGitHubToken() string {
+	// Priority: stored token > GH_TOKEN > GITHUB_TOKEN
+	if token := getStoredGitHubToken(); token != "" {
+		return token
+	}
+	if token := os.Getenv("GH_TOKEN"); token != "" {
+		return token
+	}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+	return ""
+}
+
+// GetSSHDir returns the SSH directory path if it exists
+func GetSSHDir() string {
+	sshDir := filepath.Join(getHomeDir(), ".ssh")
+	if _, err := os.Stat(sshDir); err == nil {
+		return sshDir
+	}
+	return ""
+}
+
+// GetGHConfigDir returns the GitHub CLI config directory if it exists
+func GetGHConfigDir() string {
+	ghDir := filepath.Join(getHomeDir(), ".config", "gh")
+	if _, err := os.Stat(filepath.Join(ghDir, "hosts.yml")); err == nil {
+		return ghDir
+	}
+	return ""
+}
+
+func runAuthAWS(cmd *cobra.Command, args []string) error {
+	ssoManager := aws.NewSSOManager()
+
+	// If no profile specified, list available profiles
+	if len(args) == 0 {
+		profiles, err := ssoManager.ListProfiles()
+		if err != nil {
+			return fmt.Errorf("failed to list profiles: %w", err)
+		}
+
+		if len(profiles) == 0 {
+			fmt.Println("No AWS profiles found.")
+			fmt.Println("Configure profiles in ~/.aws/config")
+			return nil
+		}
+
+		fmt.Println("Available AWS profiles:")
+		fmt.Println()
+		for _, p := range profiles {
+			valid, expiresAt, _ := ssoManager.CheckCredentials(p.Name)
+			if valid {
+				fmt.Printf("  %s %s (expires: %s)\n",
+					color.GreenString("●"),
+					p.Name,
+					expiresAt.Format("15:04:05"))
+			} else {
+				fmt.Printf("  %s %s (not logged in)\n",
+					color.YellowString("○"),
+					p.Name)
+			}
+		}
+		fmt.Println()
+		fmt.Println("Usage: frank auth aws <profile> [--format env|export|json|powershell]")
+		return nil
+	}
+
+	profile := args[0]
+
+	// Check credentials and optionally login
+	valid, _, _ := ssoManager.CheckCredentials(profile)
+	if !valid {
+		if authAWSLogin {
+			fmt.Fprintf(os.Stderr, "Credentials expired, logging in...\n")
+			if err := ssoManager.Login(profile); err != nil {
+				return fmt.Errorf("SSO login failed: %w", err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "%s Credentials expired for profile '%s'\n", color.RedString("✗"), profile)
+			fmt.Fprintf(os.Stderr, "Run: frank auth aws %s --login\n", profile)
+			return fmt.Errorf("credentials expired")
+		}
+	}
+
+	// Get credentials
+	creds, err := ssoManager.GetCredentials(profile)
+	if err != nil {
+		return fmt.Errorf("failed to get credentials: %w", err)
+	}
+
+	// Output in requested format
+	switch authAWSFormat {
+	case "env":
+		fmt.Printf("AWS_ACCESS_KEY_ID=%s\n", creds.AccessKeyID)
+		fmt.Printf("AWS_SECRET_ACCESS_KEY=%s\n", creds.SecretAccessKey)
+		if creds.SessionToken != "" {
+			fmt.Printf("AWS_SESSION_TOKEN=%s\n", creds.SessionToken)
+		}
+		if creds.Region != "" {
+			fmt.Printf("AWS_DEFAULT_REGION=%s\n", creds.Region)
+			fmt.Printf("AWS_REGION=%s\n", creds.Region)
+		}
+
+	case "export":
+		fmt.Printf("export AWS_ACCESS_KEY_ID=\"%s\"\n", creds.AccessKeyID)
+		fmt.Printf("export AWS_SECRET_ACCESS_KEY=\"%s\"\n", creds.SecretAccessKey)
+		if creds.SessionToken != "" {
+			fmt.Printf("export AWS_SESSION_TOKEN=\"%s\"\n", creds.SessionToken)
+		}
+		if creds.Region != "" {
+			fmt.Printf("export AWS_DEFAULT_REGION=\"%s\"\n", creds.Region)
+			fmt.Printf("export AWS_REGION=\"%s\"\n", creds.Region)
+		}
+
+	case "powershell":
+		fmt.Printf("$env:AWS_ACCESS_KEY_ID=\"%s\"\n", creds.AccessKeyID)
+		fmt.Printf("$env:AWS_SECRET_ACCESS_KEY=\"%s\"\n", creds.SecretAccessKey)
+		if creds.SessionToken != "" {
+			fmt.Printf("$env:AWS_SESSION_TOKEN=\"%s\"\n", creds.SessionToken)
+		}
+		if creds.Region != "" {
+			fmt.Printf("$env:AWS_DEFAULT_REGION=\"%s\"\n", creds.Region)
+			fmt.Printf("$env:AWS_REGION=\"%s\"\n", creds.Region)
+		}
+
+	case "json":
+		output := map[string]interface{}{
+			"AccessKeyId":     creds.AccessKeyID,
+			"SecretAccessKey": creds.SecretAccessKey,
+			"Version":         1,
+		}
+		if creds.SessionToken != "" {
+			output["SessionToken"] = creds.SessionToken
+		}
+		if creds.Region != "" {
+			output["Region"] = creds.Region
+		}
+		if !creds.Expiration.IsZero() {
+			output["Expiration"] = creds.Expiration.Format("2006-01-02T15:04:05Z")
+		}
+		jsonBytes, _ := json.MarshalIndent(output, "", "  ")
+		fmt.Println(string(jsonBytes))
+
+	default:
+		return fmt.Errorf("unknown format: %s (use: env, export, json, powershell)", authAWSFormat)
+	}
+
+	return nil
+}

@@ -1,0 +1,34 @@
+# Dev environment configuration
+# See: https://aws.github.io/copilot-cli/docs/manifest/environment/
+
+name: dev
+type: Environment
+
+# Network configuration
+network:
+  vpc:
+    # Use default VPC, or specify your own
+    # id: vpc-xxxxxxxxx
+    # subnets:
+    #   private:
+    #     - id: subnet-aaaa
+    #     - id: subnet-bbbb
+    #   public:
+    #     - id: subnet-cccc
+    #     - id: subnet-dddd
+
+# HTTP configuration
+http:
+  public:
+    # Optional: restrict access by IP
+    # ingress:
+    #   restrict_ip:
+    #     cdn: false
+    #     source_ips:
+    #       - 10.0.0.0/8
+    #       - your.public.ip/32
+  private: {}
+
+# Observability
+observability:
+  tracing: awsxray

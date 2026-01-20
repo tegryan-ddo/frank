@@ -1,0 +1,36 @@
+# CodeBuild buildspec for Frank pipeline
+# This file is used by AWS CodePipeline to build and deploy the service
+
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      - echo "Installing AWS Copilot CLI..."
+      - curl -Lo copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux
+      - chmod +x copilot
+      - mv copilot /usr/local/bin/copilot
+      - copilot --version
+
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - echo "Pre-build phase complete"
+
+  build:
+    commands:
+      - echo "Building Docker image..."
+      - echo "Build started on $(date)"
+      - copilot svc package -n frank -e $COPILOT_ENVIRONMENT_NAME --output-dir ./infrastructure
+      - copilot svc deploy -n frank -e $COPILOT_ENVIRONMENT_NAME --tag $CODEBUILD_RESOLVED_SOURCE_VERSION
+
+  post_build:
+    commands:
+      - echo "Build completed on $(date)"
+
+cache:
+  paths:
+    - '/root/.docker/**/*'

@@ -1,0 +1,27 @@
+# Pipeline manifest for Frank
+# See: https://aws.github.io/copilot-cli/docs/manifest/pipeline/
+
+name: frank-pipeline
+version: 1
+
+source:
+  provider: GitHub
+  properties:
+    branch: main
+    repository: https://github.com/tegryan-ddo/enkai
+    # connection_name will be created during pipeline init
+
+build:
+  image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+
+stages:
+  - name: dev
+    deployments:
+      frank:
+        depends_on: []
+
+  - name: prod
+    requires_approval: true
+    deployments:
+      frank:
+        depends_on: []
