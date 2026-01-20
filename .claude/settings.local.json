@@ -23,7 +23,10 @@
       "Bash(powershell -Command:*)",
       "Bash(aws codebuild list-builds-for-project:*)",
       "Bash(xargs:*)",
-      "Bash(MSYS_NO_PATHCONV=1 aws logs get-log-events:*)"
+      "Bash(MSYS_NO_PATHCONV=1 aws logs get-log-events:*)",
+      "Bash(aws codepipeline get-pipeline-execution:*)",
+      "Bash(aws s3api put-bucket-policy:*)",
+      "Bash(git check-ignore:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\barff\\Documents\\autoclauto\\.claude",
