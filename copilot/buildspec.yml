@@ -11,9 +11,9 @@ phases:
   install:
     commands:
       - echo "Installing AWS Copilot CLI..."
-      - curl -Lo copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux
-      - chmod +x copilot
-      - mv copilot /usr/local/bin/copilot
+      - curl -fsSL -o /tmp/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux
+      - chmod +x /tmp/copilot
+      - mv /tmp/copilot /usr/local/bin/copilot
       - copilot --version
       - echo "Starting Docker daemon..."
       - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
