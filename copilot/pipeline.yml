@@ -20,8 +20,3 @@ stages:
       frank:
         depends_on: []
 
-  - name: prod
-    requires_approval: true
-    deployments:
-      frank:
-        depends_on: []
