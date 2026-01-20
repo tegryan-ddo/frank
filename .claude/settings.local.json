@@ -18,6 +18,10 @@
       "Bash(./frank.exe start:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\barff\\Documents\\autoclauto\\.claude",
+      "c:\\Users\\barff\\Documents\\autoclauto\\.claude\\skills"
     ]
   }
 }
