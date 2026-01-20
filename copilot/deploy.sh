@@ -49,29 +49,39 @@ case "$ACTION" in
 
     secrets)
         echo "Setting up secrets for environment: $ENV"
+        cd "$PROJECT_DIR"
 
-        # Prompt for Claude credentials
+        # GitHub token - try to get automatically via gh CLI
         echo ""
-        echo "Enter your Claude OAuth credentials JSON (from ~/.claude/.credentials.json):"
-        echo "Paste the JSON and press Ctrl+D when done:"
-        CLAUDE_CREDS=$(cat)
+        echo "Getting GitHub token..."
+        GH_TOKEN=$(gh auth token 2>/dev/null || true)
 
-        # Prompt for GitHub token
+        if [ -z "$GH_TOKEN" ]; then
+            echo "Enter your GitHub token (run 'gh auth token' to get it):"
+            read -r GH_TOKEN
+        else
+            echo "Using token from 'gh auth token'"
+        fi
+
+        if [ -n "$GH_TOKEN" ]; then
+            echo "Creating GITHUB_TOKEN secret..."
+            copilot secret init --name GITHUB_TOKEN --values "$ENV=$GH_TOKEN" --overwrite
+        fi
+
+        # Claude credentials - read from default location
         echo ""
-        echo "Enter your GitHub token (run 'gh auth token' to get it):"
-        read -r GH_TOKEN
+        CRED_FILE="$HOME/.claude/.credentials.json"
+        echo "Reading Claude credentials from $CRED_FILE..."
 
-        # Update secrets in AWS
-        echo "Updating secrets in AWS Secrets Manager..."
-        aws secretsmanager put-secret-value \
-            --secret-id "/copilot/frank/$ENV/secrets/claude-credentials" \
-            --secret-string "$CLAUDE_CREDS"
-
-        aws secretsmanager put-secret-value \
-            --secret-id "/copilot/frank/$ENV/secrets/github-token" \
-            --secret-string "$GH_TOKEN"
-
-        echo "Secrets updated successfully!"
+        if [ -f "$CRED_FILE" ]; then
+            CLAUDE_CREDS=$(cat "$CRED_FILE")
+            echo "Creating CLAUDE_CREDENTIALS secret..."
+            copilot secret init --name CLAUDE_CREDENTIALS --values "$ENV=$CLAUDE_CREDS" --overwrite
+            echo "Secrets configured successfully!"
+        else
+            echo "Warning: Claude credentials file not found at $CRED_FILE"
+            echo "Run 'claude' to authenticate first, then re-run this command."
+        fi
         ;;
 
     deploy)

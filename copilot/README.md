@@ -50,28 +50,20 @@ Or:
 
 ### 3. Configure Secrets
 
-After the environment is deployed, update the secrets with your actual credentials:
+Use `copilot secret init` to create secrets (reads from local credentials automatically):
 
 ```bash
-# Get your GitHub token
-gh auth token
-
-# Update secrets
-aws secretsmanager put-secret-value \
-    --secret-id "/copilot/frank/dev/secrets/github-token" \
-    --secret-string "$(gh auth token)"
-
-# For Claude credentials, copy from your local machine
-# (You need to authenticate with Claude first to have these)
-aws secretsmanager put-secret-value \
-    --secret-id "/copilot/frank/dev/secrets/claude-credentials" \
-    --secret-string "$(cat ~/.claude/.credentials.json)"
-```
-
-Or use the interactive script:
-```bash
+# Using the deploy script (recommended - auto-reads local credentials)
 ./copilot/deploy.sh secrets dev
+
+# Or manually with copilot secret init
+copilot secret init --name GITHUB_TOKEN --values "dev=$(gh auth token)"
+copilot secret init --name CLAUDE_CREDENTIALS --values "dev=$(cat ~/.claude/.credentials.json)"
 ```
+
+Prerequisites:
+- GitHub: Be logged in via `gh auth login`
+- Claude: Have `~/.claude/.credentials.json` from running `claude` locally
 
 ### 4. Deploy Service
 

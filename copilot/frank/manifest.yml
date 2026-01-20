@@ -49,12 +49,10 @@ variables:
   STATUS_PORT: "7683"
   AWS_REGION: us-east-1
 
-# Secrets from addon CloudFormation outputs
+# Secrets (created via: copilot secret init)
 secrets:
-  CLAUDE_CREDENTIALS_SECRET_ARN:
-    from_cfn: ClaudeCredentialsSecretArn
-  GITHUB_TOKEN_SECRET_ARN:
-    from_cfn: GitHubTokenSecretArn
+  GITHUB_TOKEN: GITHUB_TOKEN
+  CLAUDE_CREDENTIALS: CLAUDE_CREDENTIALS
 
 # Storage - EFS for persistent workspace
 storage:

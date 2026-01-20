@@ -38,41 +38,29 @@ trap cleanup_worktree SIGTERM SIGINT EXIT
 echo "=== Frank ECS Container Starting ==="
 echo "Container name: $CONTAINER_NAME"
 
-# Fetch Claude credentials from Secrets Manager
-if [ -n "$CLAUDE_CREDENTIALS_SECRET_ARN" ]; then
-    echo "Fetching Claude credentials from Secrets Manager..."
+# Setup Claude credentials (injected by Copilot secrets)
+if [ -n "$CLAUDE_CREDENTIALS" ]; then
+    echo "Configuring Claude credentials..."
     mkdir -p "$HOME/.claude"
-
-    # Fetch the secret and write to credentials file
-    aws secretsmanager get-secret-value \
-        --secret-id "$CLAUDE_CREDENTIALS_SECRET_ARN" \
-        --query 'SecretString' \
-        --output text > "$HOME/.claude/.credentials.json"
-
+    echo "$CLAUDE_CREDENTIALS" > "$HOME/.claude/.credentials.json"
     chmod 600 "$HOME/.claude/.credentials.json"
     echo "Claude OAuth credentials configured"
 else
-    echo "WARNING: CLAUDE_CREDENTIALS_SECRET_ARN not set - Claude auth may fail"
+    echo "WARNING: CLAUDE_CREDENTIALS not set - Claude auth may fail"
 fi
 
-# Fetch GitHub token from Secrets Manager
-if [ -n "$GITHUB_TOKEN_SECRET_ARN" ]; then
-    echo "Fetching GitHub token from Secrets Manager..."
-
-    export GH_TOKEN=$(aws secretsmanager get-secret-value \
-        --secret-id "$GITHUB_TOKEN_SECRET_ARN" \
-        --query 'SecretString' \
-        --output text)
-
-    # Setup gh CLI auth
-    echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
+# Setup GitHub token (injected by Copilot secrets)
+if [ -n "$GITHUB_TOKEN" ]; then
+    echo "Configuring GitHub token..."
+    export GH_TOKEN="$GITHUB_TOKEN"
+    echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
     gh auth setup-git 2>/dev/null || true
     echo "GitHub token configured"
 elif [ -n "$GH_TOKEN" ]; then
-    # Token passed directly as env var
+    # Token passed directly as GH_TOKEN env var
     echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
     gh auth setup-git 2>/dev/null || true
-    echo "GitHub token configured (from env)"
+    echo "GitHub token configured (from GH_TOKEN)"
 else
     echo "WARNING: No GitHub token configured"
 fi

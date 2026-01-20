@@ -55,35 +55,43 @@ switch ($Action) {
 
     "secrets" {
         Write-Host "Setting up secrets for environment: $Env"
+        Push-Location $ProjectDir
 
-        # GitHub token
+        # GitHub token - try to get automatically via gh CLI
         Write-Host ""
-        $ghToken = Read-Host "Enter your GitHub token (run 'gh auth token' to get it)"
+        Write-Host "Getting GitHub token..."
+        $ghToken = $null
+        try {
+            $ghToken = (gh auth token 2>$null)
+        } catch {}
 
-        Write-Host "Updating GitHub token in AWS Secrets Manager..."
-        aws secretsmanager put-secret-value `
-            --secret-id "/copilot/frank/$Env/secrets/github-token" `
-            --secret-string $ghToken
-
-        # Claude credentials
-        Write-Host ""
-        Write-Host "Enter path to Claude credentials file (default: ~/.claude/.credentials.json):"
-        $credPath = Read-Host
-        if ([string]::IsNullOrEmpty($credPath)) {
-            $credPath = "$env:USERPROFILE\.claude\.credentials.json"
+        if ([string]::IsNullOrEmpty($ghToken)) {
+            $ghToken = Read-Host "Enter your GitHub token (run 'gh auth token' to get it)"
+        } else {
+            Write-Host "Using token from 'gh auth token'" -ForegroundColor Green
         }
+
+        if (-not [string]::IsNullOrEmpty($ghToken)) {
+            Write-Host "Creating GITHUB_TOKEN secret..."
+            copilot secret init --name GITHUB_TOKEN --values "$Env=$ghToken" --overwrite
+        }
+
+        # Claude credentials - read from default location
+        Write-Host ""
+        $credPath = "$env:USERPROFILE\.claude\.credentials.json"
+        Write-Host "Reading Claude credentials from $credPath..."
 
         if (Test-Path $credPath) {
-            $claudeCreds = Get-Content $credPath -Raw
-            Write-Host "Updating Claude credentials in AWS Secrets Manager..."
-            aws secretsmanager put-secret-value `
-                --secret-id "/copilot/frank/$Env/secrets/claude-credentials" `
-                --secret-string $claudeCreds
-            Write-Host "Secrets updated successfully!" -ForegroundColor Green
+            $claudeCreds = (Get-Content $credPath -Raw).Trim()
+            Write-Host "Creating CLAUDE_CREDENTIALS secret..."
+            copilot secret init --name CLAUDE_CREDENTIALS --values "$Env=$claudeCreds" --overwrite
+            Write-Host "Secrets configured successfully!" -ForegroundColor Green
         } else {
             Write-Host "Warning: Claude credentials file not found at $credPath" -ForegroundColor Yellow
-            Write-Host "You'll need to update the secret manually after authenticating with Claude."
+            Write-Host "Run 'claude' to authenticate first, then re-run this command."
         }
+
+        Pop-Location
     }
 
     "deploy" {

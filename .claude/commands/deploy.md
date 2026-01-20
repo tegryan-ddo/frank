@@ -58,13 +58,13 @@ AWS Region: us-east-1
    copilot env deploy --name $ENV
    ```
 
-4. **Configure secrets**
+4. **Configure secrets** (uses `copilot secret init`)
    - Get GitHub token via `gh auth token`
    - Read Claude credentials from `~/.claude/.credentials.json` or `$env:USERPROFILE\.claude\.credentials.json`
-   - Store in Secrets Manager:
+   - Create secrets:
    ```bash
-   aws secretsmanager put-secret-value --secret-id "/copilot/frank/$ENV/secrets/github-token" --secret-string "$GH_TOKEN"
-   aws secretsmanager put-secret-value --secret-id "/copilot/frank/$ENV/secrets/claude-credentials" --secret-string "$CLAUDE_CREDS"
+   copilot secret init --name GITHUB_TOKEN --values "$ENV=$(gh auth token)" --overwrite
+   copilot secret init --name CLAUDE_CREDENTIALS --values "$ENV=$(cat ~/.claude/.credentials.json)" --overwrite
    ```
 
 5. **Deploy service**
