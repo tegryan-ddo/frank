@@ -26,7 +26,8 @@
       "Bash(MSYS_NO_PATHCONV=1 aws logs get-log-events:*)",
       "Bash(aws codepipeline get-pipeline-execution:*)",
       "Bash(aws s3api put-bucket-policy:*)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(aws codestar-connections delete-connection:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\barff\\Documents\\autoclauto\\.claude",
