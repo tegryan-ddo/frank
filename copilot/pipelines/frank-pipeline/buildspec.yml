@@ -1,12 +1,21 @@
 # Copilot-generated buildspec
 version: 0.2
 
+env:
+  variables:
+    DOCKER_BUILDKIT: "1"
+
 phases:
   install:
     commands:
       - curl -Lo /tmp/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux
       - chmod +x /tmp/copilot
       - mv /tmp/copilot /usr/local/bin/copilot
+      - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 &
+      - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
   build:
     commands:
       - copilot svc package -n frank -e dev --output-dir ./infrastructure --tag $CODEBUILD_RESOLVED_SOURCE_VERSION
