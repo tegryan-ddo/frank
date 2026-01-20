@@ -17,7 +17,12 @@
       "Bash(cat:*)",
       "Bash(./frank.exe start:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(copilot --version:*)",
+      "Bash(aws sts get-caller-identity:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(aws codebuild list-builds-for-project:*)",
+      "Bash(xargs:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\barff\\Documents\\autoclauto\\.claude",
