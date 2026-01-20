@@ -30,7 +30,7 @@ case "$ACTION" in
     init)
         echo "Initializing Copilot application..."
         cd "$PROJECT_DIR"
-        copilot app init frank
+        copilot app init frank --domain frank.digitaldevops.io
 
         echo ""
         echo "Creating dev environment..."

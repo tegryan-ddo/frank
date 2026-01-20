@@ -34,7 +34,7 @@ switch ($Action) {
     "init" {
         Write-Host "Initializing Copilot application..."
         Push-Location $ProjectDir
-        copilot app init frank
+        copilot app init frank --domain frank.digitaldevops.io
 
         Write-Host ""
         Write-Host "Creating dev environment..."

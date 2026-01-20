@@ -27,7 +27,7 @@ Deploy Frank containers to AWS ECS using AWS Copilot.
 
 ```bash
 cd /path/to/frank
-copilot app init frank
+copilot app init frank --domain frank.digitaldevops.io
 copilot env init --name dev --default-config
 copilot svc init --name frank
 ```

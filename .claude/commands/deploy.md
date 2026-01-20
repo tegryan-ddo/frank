@@ -48,7 +48,7 @@ AWS Region: us-east-1
 2. **Initialize Copilot** (if needed)
    ```bash
    cd "c:\Users\barff\Documents\autoclauto"
-   copilot app init frank
+   copilot app init frank --domain frank.digitaldevops.io
    copilot env init --name $ENV --default-config
    copilot svc init --name frank
    ```
