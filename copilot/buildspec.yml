@@ -31,13 +31,17 @@ phases:
 
   build:
     commands:
-      - echo "Building and deploying Frank to env=$COPILOT_ENVIRONMENT_NAME..."
+      - echo "Building and packaging Frank for env=$COPILOT_ENVIRONMENT_NAME..."
       - echo "Build started on $(date)"
-      - copilot svc deploy -n frank -e $COPILOT_ENVIRONMENT_NAME --tag ${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo "Docker info:"
+      - docker info || echo "Docker not available"
+      - echo "Running copilot svc package..."
+      - copilot svc package -n frank -e $COPILOT_ENVIRONMENT_NAME --output-dir ./infrastructure --tag ${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest} 2>&1 || echo "Package failed, checking error..."
 
   post_build:
     commands:
       - echo "Build completed on $(date)"
+      - ls -la ./infrastructure/ 2>/dev/null || echo "No infrastructure output"
 
 cache:
   paths:

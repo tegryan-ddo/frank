@@ -22,7 +22,8 @@
       "Bash(aws sts get-caller-identity:*)",
       "Bash(powershell -Command:*)",
       "Bash(aws codebuild list-builds-for-project:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs get-log-events:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\barff\\Documents\\autoclauto\\.claude",
