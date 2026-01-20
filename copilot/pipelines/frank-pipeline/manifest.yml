@@ -18,7 +18,7 @@ source:
     branch: main
     repository: https://github.com/tegryan-ddo/frank
     # Optional: specify the name of an existing CodeStar Connections connection.
-    # connection_name: a-connection
+    connection_name: frank
 
 # This section defines the order of the environments your pipeline will deploy to.
 stages:
