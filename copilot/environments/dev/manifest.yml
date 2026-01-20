@@ -17,9 +17,11 @@ network:
     #     - id: subnet-cccc
     #     - id: subnet-dddd
 
-# HTTP configuration
+# HTTP configuration with custom domain
 http:
   public:
+    certificates:
+      - arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERTIFICATE_ID
     # Optional: restrict access by IP
     # ingress:
     #   restrict_ip:

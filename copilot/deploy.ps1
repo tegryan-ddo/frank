@@ -141,6 +141,31 @@ switch ($Action) {
         }
     }
 
+    "cert" {
+        Write-Host "Requesting ACM certificate for frank.digitaldevops.io..."
+        $result = aws acm request-certificate `
+            --domain-name "frank.digitaldevops.io" `
+            --validation-method DNS `
+            --region us-east-1 `
+            --output json | ConvertFrom-Json
+
+        $certArn = $result.CertificateArn
+        Write-Host ""
+        Write-Host "Certificate ARN: $certArn" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Next steps:"
+        Write-Host "1. Get the DNS validation record:"
+        Write-Host "   aws acm describe-certificate --certificate-arn `"$certArn`" --query 'Certificate.DomainValidationOptions[0].ResourceRecord'"
+        Write-Host ""
+        Write-Host "2. Add that CNAME record to your DNS (digitaldevops.io)"
+        Write-Host ""
+        Write-Host "3. Update copilot/environments/dev/manifest.yml with the certificate ARN:"
+        Write-Host "   certificates:"
+        Write-Host "     - $certArn"
+        Write-Host ""
+        Write-Host "4. After DNS validation completes, deploy: .\deploy.ps1 env dev"
+    }
+
     "pipeline-init" {
         Write-Host "Initializing CI/CD pipeline..."
         Push-Location $ProjectDir
@@ -181,6 +206,7 @@ Actions:
   logs            - Stream service logs
   exec            - Open shell in container
   url             - Get service URL
+  cert            - Request ACM certificate for custom domain
   delete          - Delete service from environment
   delete-all      - Delete entire application
 
