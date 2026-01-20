@@ -1,0 +1,94 @@
+# Frank - Claude Code Container Service
+# See: https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/
+
+name: frank
+type: Load Balanced Web Service
+
+image:
+  build:
+    dockerfile: build/Dockerfile.ecs
+    context: .
+  port: 7680
+
+http:
+  path: '/'
+  alias: frank.digitaldevops.io
+  healthcheck:
+    path: '/health'
+    port: 7683
+    success_codes: '200'
+    healthy_threshold: 2
+    unhealthy_threshold: 5
+    interval: 30s
+    timeout: 10s
+  target_port: 7680
+
+# Network configuration
+network:
+  vpc:
+    placement: public  # Use public for direct ALB access
+
+# Container configuration
+cpu: 2048        # 2 vCPU
+memory: 4096     # 4 GB
+
+# Task count
+count: 1
+
+# Platform
+platform: linux/amd64
+
+# Enable ECS Exec for debugging
+exec: true
+
+# Environment variables
+variables:
+  WEB_PORT: "7680"
+  TTYD_PORT: "7681"
+  BASH_PORT: "7682"
+  STATUS_PORT: "7683"
+  AWS_REGION: us-east-1
+
+# Secrets from addon CloudFormation outputs
+secrets:
+  CLAUDE_CREDENTIALS_SECRET_ARN:
+    from_cfn: ClaudeCredentialsSecretArn
+  GITHUB_TOKEN_SECRET_ARN:
+    from_cfn: GitHubTokenSecretArn
+
+# Storage - EFS for persistent workspace
+storage:
+  volumes:
+    workspace:
+      efs: true
+      path: /workspace
+      read_only: false
+
+# Expose multiple ports
+taskdef_overrides:
+  - path: ContainerDefinitions[0].PortMappings[-]
+    value:
+      ContainerPort: 7681
+      Protocol: tcp
+      Name: claude
+  - path: ContainerDefinitions[0].PortMappings[-]
+    value:
+      ContainerPort: 7682
+      Protocol: tcp
+      Name: bash
+  - path: ContainerDefinitions[0].PortMappings[-]
+    value:
+      ContainerPort: 7683
+      Protocol: tcp
+      Name: status
+
+# Environment-specific overrides
+environments:
+  dev:
+    count: 1
+    cpu: 1024
+    memory: 2048
+  prod:
+    count: 1
+    cpu: 2048
+    memory: 4096

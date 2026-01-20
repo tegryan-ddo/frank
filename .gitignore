@@ -1,9 +1,9 @@
 # Binaries
-frank
-frank.exe
+/frank
+/frank.exe
 /frank-*
 *.exe
-!copilot/pipelines/
+!copilot/
 
 # Build artifacts
 dist/
