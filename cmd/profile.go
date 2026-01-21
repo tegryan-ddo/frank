@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/barff/frank/internal/profile"
 	"github.com/fatih/color"
 	"github.com/olekukonko/tablewriter"
@@ -33,6 +38,9 @@ var (
 	profileAddDescription string
 )
 
+// SSM parameter name for profiles
+const ssmProfilesParam = "/frank/profiles"
+
 func init() {
 	rootCmd.AddCommand(profileCmd)
 
@@ -41,6 +49,7 @@ func init() {
 	profileCmd.AddCommand(profileAddCmd)
 	profileCmd.AddCommand(profileShowCmd)
 	profileCmd.AddCommand(profileRemoveCmd)
+	profileCmd.AddCommand(profileSyncCmd)
 
 	// Add command flags
 	profileAddCmd.Flags().StringVarP(&profileAddRepo, "repo", "r", "", "Git repository URL (required)")
@@ -211,5 +220,82 @@ func runProfileRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Profile %q removed\n", color.GreenString("✓"), name)
+	return nil
+}
+
+// ============================================================================
+// profile sync - Sync profiles to AWS SSM Parameter Store
+// ============================================================================
+
+var profileSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync profiles to AWS SSM Parameter Store",
+	Long: `Sync local profiles to AWS SSM Parameter Store for the launch page.
+
+The web-based launch page reads profiles from SSM Parameter Store.
+This command uploads your local profiles to AWS so they appear on the web UI.`,
+	RunE: runProfileSync,
+}
+
+func runProfileSync(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	// Load local profiles
+	cfg, err := profile.LoadProfiles()
+	if err != nil {
+		return fmt.Errorf("failed to load profiles: %w", err)
+	}
+
+	if len(cfg.Profiles) == 0 {
+		fmt.Println("No profiles to sync.")
+		return nil
+	}
+
+	// Convert to JSON array format for Lambda
+	type ssmProfile struct {
+		Name        string `json:"name"`
+		Repo        string `json:"repo"`
+		Branch      string `json:"branch,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+
+	profiles := make([]ssmProfile, 0, len(cfg.Profiles))
+	for name, p := range cfg.Profiles {
+		profiles = append(profiles, ssmProfile{
+			Name:        name,
+			Repo:        p.Repo,
+			Branch:      p.Branch,
+			Description: p.Description,
+		})
+	}
+
+	jsonData, err := json.Marshal(profiles)
+	if err != nil {
+		return fmt.Errorf("failed to marshal profiles: %w", err)
+	}
+
+	// Load AWS config
+	awsCfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Update SSM parameter
+	ssmClient := ssm.NewFromConfig(awsCfg)
+	_, err = ssmClient.PutParameter(ctx, &ssm.PutParameterInput{
+		Name:      aws.String(ssmProfilesParam),
+		Value:     aws.String(string(jsonData)),
+		Type:      "String",
+		Overwrite: aws.Bool(true),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update SSM parameter: %w", err)
+	}
+
+	fmt.Printf("%s Synced %d profile(s) to AWS SSM\n", color.GreenString("✓"), len(profiles))
+	fmt.Printf("  Parameter: %s\n", ssmProfilesParam)
+	fmt.Println()
+	fmt.Println("Profiles are now available on the launch page.")
+
 	return nil
 }
