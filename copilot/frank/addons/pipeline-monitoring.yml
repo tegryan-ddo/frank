@@ -1,0 +1,52 @@
+# Pipeline monitoring permissions for Frank task role
+# Allows Claude Code to monitor CodePipeline deployments and ECS services
+
+Parameters:
+  App:
+    Type: String
+    Description: Your application's name.
+  Env:
+    Type: String
+    Description: The environment name your service is deployed to.
+  Name:
+    Type: String
+    Description: The name of the service.
+
+Resources:
+  PipelineMonitoringPolicy:
+    Metadata:
+      'aws:copilot:description': 'IAM policy for pipeline and ECS monitoring'
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub 'Allow ${Name} to monitor CodePipeline deployments and ECS services'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PipelineMonitoring
+            Effect: Allow
+            Action:
+              - codepipeline:GetPipelineState
+              - codepipeline:GetPipelineExecution
+              - codepipeline:ListPipelineExecutions
+              - codebuild:BatchGetBuilds
+              - codebuild:ListBuildsForProject
+            Resource: '*'
+          - Sid: ECSMonitoring
+            Effect: Allow
+            Action:
+              - ecs:ListServices
+              - ecs:DescribeServices
+              - ecs:ListTasks
+              - ecs:DescribeTasks
+            Resource: '*'
+          - Sid: LogsMonitoring
+            Effect: Allow
+            Action:
+              - logs:GetLogEvents
+              - logs:FilterLogEvents
+            Resource: '*'
+
+Outputs:
+  PipelineMonitoringPolicyArn:
+    Description: ARN of the pipeline monitoring policy to attach to the task role
+    Value: !Ref PipelineMonitoringPolicy
