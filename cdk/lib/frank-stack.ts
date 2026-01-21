@@ -1,0 +1,574 @@
+import * as cdk from 'aws-cdk-lib';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as efs from 'aws-cdk-lib/aws-efs';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as elbv2Actions from 'aws-cdk-lib/aws-elasticloadbalancingv2-actions';
+import * as elbv2Targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as path from 'path';
+import { Construct } from 'constructs';
+
+export interface FrankStackProps extends cdk.StackProps {
+  domainName: string;
+  hostedZoneId: string;
+  certificateArn: string;
+  cognitoUserPoolId?: string;
+  cognitoClientId?: string;
+  cognitoDomain?: string;
+}
+
+export class FrankStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: FrankStackProps) {
+    super(scope, id, props);
+
+    // VPC - create a new one for isolation
+    const vpc = new ec2.Vpc(this, 'FrankVpc', {
+      maxAzs: 2,
+      natGateways: 1,
+      subnetConfiguration: [
+        {
+          name: 'Public',
+          subnetType: ec2.SubnetType.PUBLIC,
+          cidrMask: 24,
+        },
+        {
+          name: 'Private',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+          cidrMask: 24,
+        },
+      ],
+    });
+
+    // ECS Cluster
+    const cluster = new ecs.Cluster(this, 'FrankCluster', {
+      vpc,
+      clusterName: 'frank',
+      containerInsights: true,
+    });
+
+    // EFS File System for persistent workspace storage
+    const fileSystem = new efs.FileSystem(this, 'FrankEfs', {
+      vpc,
+      lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
+      performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
+      throughputMode: efs.ThroughputMode.BURSTING,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encrypted: true,
+    });
+
+    // EFS Access Point
+    const accessPoint = fileSystem.addAccessPoint('FrankAccessPoint', {
+      path: '/workspace',
+      posixUser: {
+        uid: '1000',
+        gid: '1000',
+      },
+      createAcl: {
+        ownerUid: '1000',
+        ownerGid: '1000',
+        permissions: '755',
+      },
+    });
+
+    // Secrets - stored in Secrets Manager
+    const githubTokenSecret = new secretsmanager.Secret(this, 'GitHubToken', {
+      secretName: '/frank/github-token',
+      description: 'GitHub token for Frank containers',
+    });
+
+    const claudeCredentialsSecret = new secretsmanager.Secret(this, 'ClaudeCredentials', {
+      secretName: '/frank/claude-credentials',
+      description: 'Claude OAuth credentials for Frank containers',
+    });
+
+    // Task Definition
+    const taskDefinition = new ecs.FargateTaskDefinition(this, 'FrankTask', {
+      memoryLimitMiB: 4096,
+      cpu: 2048,
+      runtimePlatform: {
+        cpuArchitecture: ecs.CpuArchitecture.X86_64,
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+      },
+    });
+
+    // Add EFS volume to task
+    taskDefinition.addVolume({
+      name: 'workspace',
+      efsVolumeConfiguration: {
+        fileSystemId: fileSystem.fileSystemId,
+        transitEncryption: 'ENABLED',
+        authorizationConfig: {
+          accessPointId: accessPoint.accessPointId,
+          iam: 'ENABLED',
+        },
+      },
+    });
+
+    // Grant EFS access to task role
+    fileSystem.grantRootAccess(taskDefinition.taskRole);
+    fileSystem.connections.allowDefaultPortFrom(ec2.Peer.ipv4(vpc.vpcCidrBlock));
+
+    // Log group
+    const logGroup = new logs.LogGroup(this, 'FrankLogs', {
+      logGroupName: '/ecs/frank',
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Container Definition
+    const container = taskDefinition.addContainer('frank', {
+      image: ecs.ContainerImage.fromAsset('..', {
+        file: 'build/Dockerfile.ecs',
+        exclude: ['cdk', 'cdk.out', 'node_modules', '.git'],
+      }),
+      logging: ecs.LogDrivers.awsLogs({
+        logGroup,
+        streamPrefix: 'frank',
+      }),
+      environment: {
+        WEB_PORT: '7680',
+        TTYD_PORT: '7681',
+        BASH_PORT: '7682',
+        STATUS_PORT: '7683',
+        AWS_REGION: this.region,
+        // Clone this repo on container startup
+        GIT_REPO: 'https://github.com/tegryan-ddo/enkai.git',
+        GIT_BRANCH: 'main',
+      },
+      secrets: {
+        GITHUB_TOKEN: ecs.Secret.fromSecretsManager(githubTokenSecret),
+        CLAUDE_CREDENTIALS: ecs.Secret.fromSecretsManager(claudeCredentialsSecret),
+      },
+      portMappings: [
+        { containerPort: 7680, name: 'web' },
+        { containerPort: 7681, name: 'claude' },
+        { containerPort: 7682, name: 'bash' },
+        { containerPort: 7683, name: 'status' },
+      ],
+      healthCheck: {
+        command: ['CMD-SHELL', 'curl -f http://localhost:7683/health || exit 1'],
+        interval: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(10),
+        retries: 3,
+        startPeriod: cdk.Duration.seconds(60),
+      },
+    });
+
+    // Mount EFS volume
+    container.addMountPoints({
+      sourceVolume: 'workspace',
+      containerPath: '/workspace',
+      readOnly: false,
+    });
+
+    // Import certificate
+    const certificate = acm.Certificate.fromCertificateArn(
+      this,
+      'Certificate',
+      props.certificateArn
+    );
+
+    // ALB
+    const alb = new elbv2.ApplicationLoadBalancer(this, 'FrankAlb', {
+      vpc,
+      internetFacing: true,
+      loadBalancerName: 'frank-alb',
+      idleTimeout: cdk.Duration.seconds(3600), // 1 hour timeout for long-running WebSocket connections
+    });
+
+    // Import existing Cognito User Pool (enkai-dev)
+    const userPool = props.cognitoUserPoolId
+      ? cognito.UserPool.fromUserPoolId(this, 'EnkaiUserPool', props.cognitoUserPoolId)
+      : undefined;
+
+    const userPoolClient = userPool && props.cognitoClientId
+      ? cognito.UserPoolClient.fromUserPoolClientId(this, 'EnkaiClient', props.cognitoClientId)
+      : undefined;
+
+    // HTTPS Listener
+    const httpsListener = alb.addListener('HttpsListener', {
+      port: 443,
+      certificates: [certificate],
+      protocol: elbv2.ApplicationProtocol.HTTPS,
+      defaultAction: elbv2.ListenerAction.fixedResponse(403, {
+        contentType: 'text/plain',
+        messageBody: 'Forbidden',
+      }),
+    });
+
+    // HTTP redirect to HTTPS
+    alb.addListener('HttpListener', {
+      port: 80,
+      defaultAction: elbv2.ListenerAction.redirect({
+        protocol: 'HTTPS',
+        port: '443',
+        permanent: true,
+      }),
+    });
+
+    // Security group for ECS tasks
+    const serviceSg = new ec2.SecurityGroup(this, 'FrankServiceSg', {
+      vpc,
+      description: 'Security group for Frank ECS service',
+      allowAllOutbound: true,
+    });
+
+    // Allow ALB to connect to service (web port)
+    serviceSg.addIngressRule(
+      ec2.Peer.securityGroupId(alb.connections.securityGroups[0].securityGroupId),
+      ec2.Port.tcpRange(7680, 7683),
+      'Allow ALB to reach Frank ports'
+    );
+
+    // Allow ALB to reach health check port (explicit egress rule)
+    alb.connections.securityGroups[0].addEgressRule(
+      serviceSg,
+      ec2.Port.tcp(7683),
+      'Allow ALB to reach health check port'
+    );
+
+    // Allow EFS access
+    fileSystem.connections.allowFrom(serviceSg, ec2.Port.tcp(2049));
+
+    // Fargate Service
+    const service = new ecs.FargateService(this, 'FrankService', {
+      cluster,
+      taskDefinition,
+      desiredCount: 1,
+      assignPublicIp: false,
+      securityGroups: [serviceSg],
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      enableExecuteCommand: true,
+      serviceName: 'frank',
+    });
+
+    // Target group for web port
+    const webTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrankWebTarget', {
+      vpc,
+      port: 7680,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/health',
+        port: '7683',
+        protocol: elbv2.Protocol.HTTP,
+        healthyHttpCodes: '200',
+        interval: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(10),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
+      deregistrationDelay: cdk.Duration.seconds(30),
+    });
+
+    // Target group for status endpoint (context panel)
+    const statusTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrankStatusTarget', {
+      vpc,
+      port: 7683,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/health',
+        port: '7683',
+        protocol: elbv2.Protocol.HTTP,
+        healthyHttpCodes: '200',
+        interval: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(10),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
+      deregistrationDelay: cdk.Duration.seconds(30),
+    });
+
+    // Target group for Claude ttyd terminal
+    const claudeTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrankClaudeTarget', {
+      vpc,
+      port: 7681,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/health',
+        port: '7683',
+        protocol: elbv2.Protocol.HTTP,
+        healthyHttpCodes: '200',
+        interval: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(10),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
+      deregistrationDelay: cdk.Duration.seconds(30),
+      stickinessCookieDuration: cdk.Duration.hours(1),
+    });
+
+    // Target group for Bash ttyd terminal
+    const bashTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrankBashTarget', {
+      vpc,
+      port: 7682,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/health',
+        port: '7683',
+        protocol: elbv2.Protocol.HTTP,
+        healthyHttpCodes: '200',
+        interval: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(10),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
+      deregistrationDelay: cdk.Duration.seconds(30),
+      stickinessCookieDuration: cdk.Duration.hours(1),
+    });
+
+    // Attach service to target groups with explicit container port mapping
+    webTargetGroup.addTarget(service.loadBalancerTarget({
+      containerName: 'frank',
+      containerPort: 7680,
+    }));
+    statusTargetGroup.addTarget(service.loadBalancerTarget({
+      containerName: 'frank',
+      containerPort: 7683,
+    }));
+    claudeTargetGroup.addTarget(service.loadBalancerTarget({
+      containerName: 'frank',
+      containerPort: 7681,
+    }));
+    bashTargetGroup.addTarget(service.loadBalancerTarget({
+      containerName: 'frank',
+      containerPort: 7682,
+    }));
+
+    // Cognito authentication action (if configured)
+    const cognitoDomain = props.cognitoDomain || 'enkai-dev';
+    const authAction = userPool && userPoolClient
+      ? new elbv2Actions.AuthenticateCognitoAction({
+          userPool,
+          userPoolClient,
+          userPoolDomain: cognito.UserPoolDomain.fromDomainName(this, 'EnkaiDomain', `${cognitoDomain}.auth.${this.region}.amazoncognito.com`),
+          next: elbv2.ListenerAction.forward([webTargetGroup]),
+        })
+      : elbv2.ListenerAction.forward([webTargetGroup]);
+
+    // Cognito auth actions for terminal routes
+    const claudeAuthAction = userPool && userPoolClient
+      ? new elbv2Actions.AuthenticateCognitoAction({
+          userPool,
+          userPoolClient,
+          userPoolDomain: cognito.UserPoolDomain.fromDomainName(this, 'EnkaiDomainClaude', `${cognitoDomain}.auth.${this.region}.amazoncognito.com`),
+          next: elbv2.ListenerAction.forward([claudeTargetGroup]),
+        })
+      : elbv2.ListenerAction.forward([claudeTargetGroup]);
+
+    const bashAuthAction = userPool && userPoolClient
+      ? new elbv2Actions.AuthenticateCognitoAction({
+          userPool,
+          userPoolClient,
+          userPoolDomain: cognito.UserPoolDomain.fromDomainName(this, 'EnkaiDomainBash', `${cognitoDomain}.auth.${this.region}.amazoncognito.com`),
+          next: elbv2.ListenerAction.forward([bashTargetGroup]),
+        })
+      : elbv2.ListenerAction.forward([bashTargetGroup]);
+
+    // Add listener rules
+    // Status endpoint - no auth required (for context panel API calls)
+    httpsListener.addAction('StatusRule', {
+      priority: 10,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/status', '/status/*', '/health'])],
+      action: elbv2.ListenerAction.forward([statusTargetGroup]),
+    });
+
+    // Claude terminal - with Cognito auth
+    httpsListener.addAction('ClaudeRule', {
+      priority: 15,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/claude', '/claude/*'])],
+      action: claudeAuthAction,
+    });
+
+    // Bash terminal - with Cognito auth
+    httpsListener.addAction('BashRule', {
+      priority: 16,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/bash', '/bash/*'])],
+      action: bashAuthAction,
+    });
+
+    // Main app - with Cognito auth if configured
+    httpsListener.addAction('MainRule', {
+      priority: 20,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/*'])],
+      action: authAction,
+    });
+
+    // Route 53 Records
+    const hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', {
+      hostedZoneId: props.hostedZoneId,
+      zoneName: 'digitaldevops.io',
+    });
+
+    // Main domain: frank.digitaldevops.io
+    new route53.ARecord(this, 'FrankDns', {
+      zone: hostedZone,
+      recordName: 'frank',
+      target: route53.RecordTarget.fromAlias(new route53Targets.LoadBalancerTarget(alb)),
+    });
+
+    // Wildcard domain: *.frank.digitaldevops.io (for profile subdomains)
+    new route53.ARecord(this, 'FrankWildcardDns', {
+      zone: hostedZone,
+      recordName: '*.frank',
+      target: route53.RecordTarget.fromAlias(new route53Targets.LoadBalancerTarget(alb)),
+    });
+
+    // =========================================================================
+    // Launch Page API (Lambda + ALB integration)
+    // =========================================================================
+
+    // SSM Parameter to store profiles configuration
+    const profilesParam = new ssm.StringParameter(this, 'ProfilesParam', {
+      parameterName: '/frank/profiles',
+      stringValue: '[]', // Empty array initially
+      description: 'Frank profile configurations (JSON array)',
+      tier: ssm.ParameterTier.STANDARD,
+    });
+
+    // Lambda function for the API
+    const apiFunction = new lambdaNodejs.NodejsFunction(this, 'FrankApiFunction', {
+      entry: path.join(__dirname, '../lambda/api/index.ts'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        ECS_CLUSTER: 'frank',
+        ECS_SERVICE: 'FrankStack-FrankService',
+        DOMAIN: props.domainName,
+        PROFILES_PARAM: profilesParam.parameterName,
+        ALB_NAME: 'frank-alb',
+      },
+      bundling: {
+        externalModules: ['@aws-sdk/*'], // Use Lambda runtime SDK
+        minify: true,
+        sourceMap: true,
+      },
+    });
+
+    // Grant Lambda permissions
+    profilesParam.grantRead(apiFunction);
+    profilesParam.grantWrite(apiFunction);
+
+    // ECS permissions
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'ecs:ListTasks',
+        'ecs:DescribeTasks',
+        'ecs:RunTask',
+        'ecs:StopTask',
+        'ecs:DescribeServices',
+      ],
+      resources: ['*'],
+    }));
+
+    // Pass role for ECS task
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['iam:PassRole'],
+      resources: [
+        taskDefinition.taskRole.roleArn,
+        taskDefinition.executionRole!.roleArn,
+      ],
+    }));
+
+    // ALB permissions for dynamic target groups
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'elasticloadbalancing:DescribeLoadBalancers',
+        'elasticloadbalancing:DescribeListeners',
+        'elasticloadbalancing:DescribeTargetGroups',
+        'elasticloadbalancing:DescribeRules',
+        'elasticloadbalancing:CreateTargetGroup',
+        'elasticloadbalancing:CreateRule',
+        'elasticloadbalancing:DeleteTargetGroup',
+        'elasticloadbalancing:DeleteRule',
+        'elasticloadbalancing:RegisterTargets',
+        'elasticloadbalancing:DeregisterTargets',
+        'elasticloadbalancing:AddTags',
+      ],
+      resources: ['*'],
+    }));
+
+    // Target group for Lambda
+    const apiTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrankApiTarget', {
+      targetType: elbv2.TargetType.LAMBDA,
+      targets: [new elbv2Targets.LambdaTarget(apiFunction)],
+    });
+
+    // Add API routes to the listener (before the main rule)
+    // API endpoint - with Cognito auth
+    const apiAuthAction = userPool && userPoolClient
+      ? new elbv2Actions.AuthenticateCognitoAction({
+          userPool,
+          userPoolClient,
+          userPoolDomain: cognito.UserPoolDomain.fromDomainName(this, 'EnkaiDomainApi', `${cognitoDomain}.auth.${this.region}.amazoncognito.com`),
+          next: elbv2.ListenerAction.forward([apiTargetGroup]),
+        })
+      : elbv2.ListenerAction.forward([apiTargetGroup]);
+
+    httpsListener.addAction('ApiRule', {
+      priority: 5,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/api', '/api/*'])],
+      action: apiAuthAction,
+    });
+
+    // Launch page at root (only for frank.digitaldevops.io, not subdomains)
+    const launchAuthAction = userPool && userPoolClient
+      ? new elbv2Actions.AuthenticateCognitoAction({
+          userPool,
+          userPoolClient,
+          userPoolDomain: cognito.UserPoolDomain.fromDomainName(this, 'EnkaiDomainLaunch', `${cognitoDomain}.auth.${this.region}.amazoncognito.com`),
+          next: elbv2.ListenerAction.forward([apiTargetGroup]),
+        })
+      : elbv2.ListenerAction.forward([apiTargetGroup]);
+
+    httpsListener.addAction('LaunchRule', {
+      priority: 6,
+      conditions: [
+        elbv2.ListenerCondition.hostHeaders([props.domainName]),
+        elbv2.ListenerCondition.pathPatterns(['/', '/launch']),
+      ],
+      action: launchAuthAction,
+    });
+
+    // Outputs
+    new cdk.CfnOutput(this, 'ServiceUrl', {
+      value: `https://${props.domainName}`,
+      description: 'Frank service URL',
+    });
+
+    new cdk.CfnOutput(this, 'AlbDnsName', {
+      value: alb.loadBalancerDnsName,
+      description: 'ALB DNS name',
+    });
+
+    new cdk.CfnOutput(this, 'GitHubTokenSecretArn', {
+      value: githubTokenSecret.secretArn,
+      description: 'GitHub token secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/github-token --secret-string "$(gh auth token)"',
+    });
+
+    new cdk.CfnOutput(this, 'ClaudeCredentialsSecretArn', {
+      value: claudeCredentialsSecret.secretArn,
+      description: 'Claude credentials secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/claude-credentials --secret-string "$(cat ~/.claude/.credentials.json)"',
+    });
+
+    new cdk.CfnOutput(this, 'EfsFileSystemId', {
+      value: fileSystem.fileSystemId,
+      description: 'EFS file system ID for workspace storage',
+    });
+  }
+}

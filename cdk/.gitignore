@@ -1,0 +1,11 @@
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+cdk.out
+*.cdk.staging
+.env
+
+# Lambda build artifacts
+lambda/*/node_modules
+lambda/*/dist

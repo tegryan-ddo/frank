@@ -1,0 +1,19 @@
+{
+  "name": "frank-api",
+  "version": "1.0.0",
+  "description": "Frank Profile API Lambda",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild index.ts --bundle --platform=node --target=node18 --outfile=dist/index.js --external:@aws-sdk/*"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ecs": "^3.0.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.0.0",
+    "@aws-sdk/client-ssm": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "esbuild": "^0.19.0",
+    "typescript": "^5.0.0"
+  }
+}
