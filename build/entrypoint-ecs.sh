@@ -18,7 +18,8 @@ URL_PREFIX="${URL_PREFIX:-}"
 # In ECS, use ECS_CONTAINER_METADATA or CONTAINER_NAME env var
 CONTAINER_NAME="${CONTAINER_NAME:-$(hostname)}"
 WORKTREE_PATH=""
-REPO_BASE="/workspace/.repo"
+# Each profile gets its own repo directory to avoid conflicts on shared EFS
+REPO_BASE="/workspace/repos/$CONTAINER_NAME"
 
 # Ensure uv tools are in PATH
 export PATH="$HOME/.local/bin:$PATH"
@@ -142,8 +143,8 @@ setup_worktree_from_clone() {
         fi
     fi
 
-    # Set worktree path using container name
-    WORKTREE_PATH="/workspace/worktrees/$CONTAINER_NAME"
+    # Set worktree path - keep under profile directory to avoid cross-profile issues
+    WORKTREE_PATH="/workspace/repos/$CONTAINER_NAME/work"
     export WORKTREE_PATH
 
     # Check if worktree already exists (reuse if same container name)
@@ -159,7 +160,7 @@ setup_worktree_from_clone() {
         fi
     else
         echo "Creating new worktree: $WORKTREE_PATH"
-        mkdir -p /workspace/worktrees
+        mkdir -p "/workspace/repos/$CONTAINER_NAME"
         git -C "$REPO_BASE" worktree add "$WORKTREE_PATH" "$branch" 2>/dev/null || \
             git -C "$REPO_BASE" worktree add -b "$CONTAINER_NAME" "$WORKTREE_PATH" "$branch" 2>/dev/null || \
             git -C "$REPO_BASE" worktree add "$WORKTREE_PATH" "origin/$branch" 2>/dev/null || \
