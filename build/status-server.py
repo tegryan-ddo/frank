@@ -72,6 +72,15 @@ processed_prompt_ids = set()
 current_session_id = str(uuid.uuid4())[:8]
 last_prompt_id = None
 
+# Version tracking for update detection
+VERSION_CACHE = {
+    'current_revision': None,
+    'latest_revision': None,
+    'task_family': None,
+    'last_check': 0,
+}
+VERSION_CHECK_INTERVAL = 300  # Check for updates every 5 minutes
+
 def log(msg):
     """Write to log file for debugging."""
     try:
@@ -91,6 +100,92 @@ def check_port(port, timeout=2):
         return result == 0
     except:
         return False
+
+
+def get_current_version():
+    """Read current task definition revision from file."""
+    try:
+        revision_file = '/tmp/frank/current-revision'
+        family_file = '/tmp/frank/task-family'
+
+        if os.path.exists(revision_file):
+            with open(revision_file) as f:
+                VERSION_CACHE['current_revision'] = f.read().strip()
+        if os.path.exists(family_file):
+            with open(family_file) as f:
+                VERSION_CACHE['task_family'] = f.read().strip()
+
+        return VERSION_CACHE['current_revision']
+    except Exception as e:
+        log(f"Error reading current version: {e}")
+        return None
+
+
+def get_latest_version():
+    """Query ECS for the latest task definition revision."""
+    global VERSION_CACHE
+
+    # Check cache freshness
+    now = time.time()
+    if now - VERSION_CACHE['last_check'] < VERSION_CHECK_INTERVAL and VERSION_CACHE['latest_revision']:
+        return VERSION_CACHE['latest_revision']
+
+    if not HAS_BOTO3:
+        return None
+
+    try:
+        family = VERSION_CACHE.get('task_family')
+        if not family:
+            get_current_version()
+            family = VERSION_CACHE.get('task_family')
+
+        if not family:
+            return None
+
+        ecs = boto3.client('ecs', region_name=AWS_REGION)
+
+        # Get the latest ACTIVE task definition for this family
+        response = ecs.list_task_definitions(
+            familyPrefix=family,
+            status='ACTIVE',
+            sort='DESC',
+            maxResults=1
+        )
+
+        if response.get('taskDefinitionArns'):
+            latest_arn = response['taskDefinitionArns'][0]
+            # Extract revision from ARN (e.g., "...:42" -> "42")
+            latest_rev = latest_arn.split(':')[-1]
+            VERSION_CACHE['latest_revision'] = latest_rev
+            VERSION_CACHE['last_check'] = now
+            log(f"Latest task definition: {family}:{latest_rev}")
+            return latest_rev
+
+    except Exception as e:
+        log(f"Error checking latest version: {e}")
+
+    return None
+
+
+def get_version_status():
+    """Get version status for update detection."""
+    current = get_current_version()
+    latest = get_latest_version()
+
+    update_available = False
+    if current and latest:
+        try:
+            update_available = int(latest) > int(current)
+        except ValueError:
+            update_available = latest != current
+
+    return {
+        'current_revision': current,
+        'latest_revision': latest,
+        'task_family': VERSION_CACHE.get('task_family'),
+        'update_available': update_available,
+        'running_in_ecs': current is not None,
+    }
 
 def get_health_status():
     """Get comprehensive health status checking all services."""
@@ -209,6 +304,15 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps(health).encode())
+                return
+
+            if path == '/status/version':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                version = get_version_status()
+                self.wfile.write(json.dumps(version).encode())
                 return
 
             # Static file serving

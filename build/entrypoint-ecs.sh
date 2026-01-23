@@ -43,6 +43,28 @@ trap cleanup_worktree SIGTERM SIGINT EXIT
 echo "=== Frank ECS Container Starting ==="
 echo "Container name: $CONTAINER_NAME"
 
+# Capture current task definition revision for update detection
+# ECS provides metadata via $ECS_CONTAINER_METADATA_URI_V4
+if [ -n "$ECS_CONTAINER_METADATA_URI_V4" ]; then
+    echo "Capturing task definition version..."
+    TASK_METADATA=$(curl -s "$ECS_CONTAINER_METADATA_URI_V4/task" 2>/dev/null || echo "{}")
+    TASK_DEF_ARN=$(echo "$TASK_METADATA" | jq -r '.TaskDefinitionArn // empty' 2>/dev/null)
+    if [ -n "$TASK_DEF_ARN" ]; then
+        # Extract revision number (e.g., "arn:aws:ecs:...:task-definition/FrankStack-FrankTask:42" -> "42")
+        TASK_DEF_REVISION=$(echo "$TASK_DEF_ARN" | grep -oE ':[0-9]+$' | tr -d ':')
+        TASK_DEF_FAMILY=$(echo "$TASK_DEF_ARN" | sed 's/:task-definition\//:/' | cut -d'/' -f2 | cut -d':' -f1)
+        echo "Task definition: $TASK_DEF_FAMILY:$TASK_DEF_REVISION"
+
+        # Store for status server to read
+        mkdir -p /tmp/frank
+        echo "$TASK_DEF_REVISION" > /tmp/frank/current-revision
+        echo "$TASK_DEF_FAMILY" > /tmp/frank/task-family
+        echo "$TASK_DEF_ARN" > /tmp/frank/task-def-arn
+    fi
+else
+    echo "Not running in ECS (no metadata URI)"
+fi
+
 # Setup Claude credentials (injected by Copilot secrets)
 if [ -n "$CLAUDE_CREDENTIALS" ]; then
     echo "Configuring Claude credentials..."

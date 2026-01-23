@@ -451,6 +451,58 @@
             background: #3c3c3c;
             border-color: #4ec9b0;
         }
+
+        /* Update Available Indicator */
+        .update-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+            padding: 4px 12px;
+            background: #3d3d00;
+            border: 1px solid #dcdcaa;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #dcdcaa;
+        }
+
+        .update-indicator.visible {
+            display: flex;
+        }
+
+        .update-indicator .update-icon {
+            font-size: 14px;
+        }
+
+        .update-indicator .update-text {
+            font-weight: 500;
+        }
+
+        .update-indicator .update-version {
+            color: #9d9d9d;
+            font-family: 'Consolas', monospace;
+        }
+
+        .restart-btn {
+            padding: 4px 10px;
+            background: #0e639c;
+            border: none;
+            border-radius: 3px;
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .restart-btn:hover {
+            background: #1177bb;
+        }
+
+        .restart-btn:disabled {
+            background: #3c3c3c;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -460,6 +512,12 @@
             <button class="tab active" data-view="split">Split View</button>
             <button class="tab" data-view="claude-only">Claude Only</button>
             <button class="tab" data-view="bash-only">Bash Only</button>
+        </div>
+        <div class="update-indicator" id="update-indicator">
+            <span class="update-icon">&#x21bb;</span>
+            <span class="update-text">Update Available</span>
+            <span class="update-version" id="update-version"></span>
+            <button class="restart-btn" id="restart-btn" title="Stop and restart this profile to apply the update">Restart</button>
         </div>
     </div>
 
@@ -912,6 +970,79 @@
         console.log('Starting status polling to:', STATUS_URL);
         pollStatus();
         setInterval(pollStatus, 5000);
+
+        // Version polling for update detection
+        const updateIndicator = document.getElementById('update-indicator');
+        const updateVersion = document.getElementById('update-version');
+        const restartBtn = document.getElementById('restart-btn');
+
+        async function checkForUpdates() {
+            try {
+                const versionUrl = STATUS_URL.replace('/status', '/status/version');
+                const response = await fetch(versionUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Version data:', data);
+
+                    if (data.update_available) {
+                        updateIndicator.classList.add('visible');
+                        updateVersion.textContent = `v${data.current_revision} → v${data.latest_revision}`;
+                    } else {
+                        updateIndicator.classList.remove('visible');
+                    }
+                }
+            } catch (e) {
+                console.warn('Version check failed:', e.message);
+            }
+        }
+
+        // Check for updates every 5 minutes
+        checkForUpdates();
+        setInterval(checkForUpdates, 5 * 60 * 1000);
+
+        // Restart button handler
+        restartBtn.addEventListener('click', async () => {
+            if (!confirm('This will stop the current task and start a new one with the latest version.\n\nAny unsaved work will be preserved on the shared filesystem, but your terminal session will be disconnected.\n\nContinue?')) {
+                return;
+            }
+
+            restartBtn.disabled = true;
+            restartBtn.textContent = 'Restarting...';
+
+            try {
+                // Get the profile name from the URL path
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                const profileName = pathParts[0] || '';
+
+                if (!profileName) {
+                    alert('Could not determine profile name for restart.');
+                    restartBtn.disabled = false;
+                    restartBtn.textContent = 'Restart';
+                    return;
+                }
+
+                // Call the API to restart the profile
+                const apiUrl = `${window.location.protocol}//${window.location.host}/api/profiles/${profileName}/restart`;
+                const response = await fetch(apiUrl, { method: 'POST' });
+
+                if (response.ok) {
+                    alert('Profile is restarting. Please wait a moment and then refresh the page.');
+                    // Optionally auto-refresh after a delay
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 30000);
+                } else {
+                    const error = await response.text();
+                    alert(`Failed to restart: ${error}`);
+                    restartBtn.disabled = false;
+                    restartBtn.textContent = 'Restart';
+                }
+            } catch (e) {
+                alert(`Error: ${e.message}\n\nYou can manually restart using:\nfrank ecs stop ${window.location.pathname.split('/')[1]}\nfrank ecs start ${window.location.pathname.split('/')[1]}`);
+                restartBtn.disabled = false;
+                restartBtn.textContent = 'Restart';
+            }
+        });
 
         // Feedback handling
         const feedbackButtons = document.getElementById('feedback-buttons');
