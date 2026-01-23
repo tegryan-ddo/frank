@@ -1,8 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)",
-      "Bash(go get:*)"
+      "Bash"
     ]
   }
 }
