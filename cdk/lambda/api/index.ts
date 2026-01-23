@@ -841,6 +841,9 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
     <header>
       <h1>Frank</h1>
       <p class="subtitle">Claude Code on AWS ECS</p>
+      <nav style="margin-top: 1rem;">
+        <a href="/dashboard" class="nav-link" style="color: var(--accent); text-decoration: none; padding: 0.5rem 1rem; border: 1px solid var(--accent); border-radius: 6px; font-size: 0.9rem;">📊 Analytics Dashboard</a>
+      </nav>
     </header>
     <div id="error" class="error" style="display: none;"></div>
     <div id="loading" class="loading"><span class="spinner"></span> Loading profiles...</div>
