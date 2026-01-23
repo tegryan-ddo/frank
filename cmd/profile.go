@@ -22,7 +22,7 @@ var profileCmd = &cobra.Command{
 	Long: `Manage profiles for Frank ECS deployments.
 
 Profiles define repository configurations that can be quickly launched
-as ECS tasks with their own subdomains.
+as ECS tasks with their own URL paths.
 
 Examples:
   frank profile list                           # List all profiles
@@ -129,7 +129,7 @@ var profileAddCmd = &cobra.Command{
 	Short: "Add a new profile",
 	Long: `Add a new Frank profile with the specified repository configuration.
 
-The profile name will be used as the subdomain: <name>.frank.digitaldevops.io`,
+The profile name will be used in the URL path: frank.digitaldevops.io/<name>/`,
 	Args: cobra.ExactArgs(1),
 	RunE: runProfileAdd,
 }
@@ -162,7 +162,7 @@ func runProfileAdd(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 	fmt.Printf("Start with: frank ecs start %s\n", name)
-	fmt.Printf("URL will be: https://%s.frank.digitaldevops.io/claude/\n", name)
+	fmt.Printf("URL will be: https://frank.digitaldevops.io/%s/\n", name)
 
 	return nil
 }
@@ -194,7 +194,7 @@ func runProfileShow(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Description: %s\n", p.Description)
 	}
 	fmt.Println()
-	fmt.Printf("  URL:         https://%s.frank.digitaldevops.io/claude/\n", name)
+	fmt.Printf("  URL:         https://frank.digitaldevops.io/%s/\n", name)
 	fmt.Println()
 
 	return nil

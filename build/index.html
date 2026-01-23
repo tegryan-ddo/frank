@@ -17,13 +17,32 @@
             width: 100%;
         }
 
-        /* Hide scrollbars globally */
+        /* Styled scrollbars - matches VS Code dark theme */
         ::-webkit-scrollbar {
-            display: none;
+            width: 8px;
+            height: 8px;
         }
+
+        ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3c3c3c;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4c4c4c;
+        }
+
+        ::-webkit-scrollbar-corner {
+            background: #1e1e1e;
+        }
+
         * {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
+            scrollbar-width: thin;
+            scrollbar-color: #3c3c3c #1e1e1e;
         }
 
         body {
@@ -354,6 +373,84 @@
             align-items: center;
             gap: 8px;
         }
+
+        /* Feedback Section */
+        .feedback-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #3c3c3c;
+        }
+
+        .feedback-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .feedback-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .feedback-btn.positive {
+            background: #1e3a1e;
+            color: #6a9955;
+        }
+
+        .feedback-btn.positive:hover {
+            background: #2d5a2d;
+            border-color: #6a9955;
+        }
+
+        .feedback-btn.negative {
+            background: #3a1e1e;
+            color: #f44747;
+        }
+
+        .feedback-btn.negative:hover {
+            background: #5a2d2d;
+            border-color: #f44747;
+        }
+
+        .feedback-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .feedback-sent {
+            text-align: center;
+            padding: 12px;
+            color: #6a9955;
+            font-size: 12px;
+        }
+
+        .dashboard-link {
+            display: block;
+            margin-top: 16px;
+            padding: 10px;
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            color: #4ec9b0;
+            text-decoration: none;
+            text-align: center;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .dashboard-link:hover {
+            background: #3c3c3c;
+            border-color: #4ec9b0;
+        }
     </style>
 </head>
 <body>
@@ -374,7 +471,7 @@
                     <span class="dot"></span>
                     Claude Code
                 </div>
-                <iframe id="claude-frame" src="CLAUDE_URL" scrolling="no"></iframe>
+                <iframe id="claude-frame" scrolling="no"></iframe>
             </div>
 
             <div class="divider-h" id="divider"></div>
@@ -384,7 +481,7 @@
                     <span class="dot"></span>
                     Bash Terminal
                 </div>
-                <iframe id="bash-frame" src="BASH_URL" scrolling="no"></iframe>
+                <iframe id="bash-frame" scrolling="no"></iframe>
             </div>
         </div>
 
@@ -460,11 +557,72 @@
                         <li class="context-empty">No files detected</li>
                     </ul>
                 </div>
+
+                <!-- Feedback Section -->
+                <div class="feedback-section" id="feedback-section">
+                    <div class="context-section-title">Rate Response</div>
+                    <div class="feedback-buttons" id="feedback-buttons">
+                        <button class="feedback-btn positive" data-rating="positive">
+                            <span>Good</span>
+                        </button>
+                        <button class="feedback-btn negative" data-rating="negative">
+                            <span>Bad</span>
+                        </button>
+                    </div>
+                    <div class="feedback-sent" id="feedback-sent" style="display: none;">
+                        Thanks for your feedback!
+                    </div>
+                </div>
+
+                <!-- Dashboard Link -->
+                <a href="/dashboard" class="dashboard-link" id="dashboard-link">
+                    View Analytics Dashboard
+                </a>
             </div>
         </div>
     </div>
 
     <script>
+        // Determine terminal URLs based on access method:
+        // - Via ALB (ports 80/443): use path-based routing
+        //   - Default: /claude/, /bash/
+        //   - Profile: /{profile}/, /{profile}/bash/
+        // - Direct access (port 7680): use port-based URLs
+        (function() {
+            const currentPort = parseInt(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80);
+            const claudeFrame = document.getElementById('claude-frame');
+            const bashFrame = document.getElementById('bash-frame');
+
+            if (currentPort === 443 || currentPort === 80) {
+                // Via ALB - detect path prefix from current URL
+                // e.g., /enkai/ -> prefix = 'enkai'
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                const pathPrefix = pathParts[0] || '';
+                const base = `${window.location.protocol}//${window.location.host}`;
+
+                // Check if this is a profile path (not a static route like /claude or /bash)
+                const staticRoutes = ['claude', 'bash', 'status', 'health', 'api', 'dashboard', '_t', '_b'];
+                if (pathPrefix && !staticRoutes.includes(pathPrefix)) {
+                    // Profile-based routing: use subpaths for terminals to avoid iframe loops
+                    // /{profile}/_t/ for Claude terminal, /{profile}/_b/ for Bash terminal
+                    claudeFrame.src = `${base}/${pathPrefix}/_t/`;
+                    bashFrame.src = `${base}/${pathPrefix}/_b/`;
+                } else {
+                    // Default service routing
+                    claudeFrame.src = `${base}/claude/`;
+                    bashFrame.src = `${base}/bash/`;
+                }
+            } else {
+                // Direct access - calculate ports (web=7680, claude=7681, bash=7682)
+                const claudePort = currentPort + 1;
+                const bashPort = currentPort + 2;
+                claudeFrame.src = `http://${window.location.hostname}:${claudePort}/`;
+                bashFrame.src = `http://${window.location.hostname}:${bashPort}/`;
+            }
+            console.log('Claude URL:', claudeFrame.src);
+            console.log('Bash URL:', bashFrame.src);
+        })();
+
         // Storage key for preferences (shared across all instances)
         const STORAGE_KEY = 'frank-layout-prefs';
 
@@ -563,12 +721,29 @@
         });
 
         // Status polling
-        // Calculate status URL dynamically from current port
-        // Web view is on port X, status is on port X+3
-        const currentPort = parseInt(window.location.port) || 80;
-        const statusPort = currentPort + 3;
-        const STATUS_URL = `http://${window.location.hostname}:${statusPort}/status`;
-        console.log('Calculated STATUS_URL from port', currentPort, '->', STATUS_URL);
+        // Determine status URL based on access method:
+        // - Via ALB (ports 80/443): use same origin with /status path (with profile prefix if applicable)
+        // - Direct access (port 7680): calculate port+3 for local status server
+        const statusPort = parseInt(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80);
+        let STATUS_URL;
+        if (statusPort === 443 || statusPort === 80) {
+            // Via ALB - detect profile prefix and use appropriate path
+            const pathParts = window.location.pathname.split('/').filter(Boolean);
+            const pathPrefix = pathParts[0] || '';
+            const staticRoutes = ['claude', 'bash', 'status', 'health', 'api', 'dashboard'];
+
+            if (pathPrefix && !staticRoutes.includes(pathPrefix)) {
+                // Profile-based: /{profile}/status
+                STATUS_URL = `${window.location.protocol}//${window.location.host}/${pathPrefix}/status`;
+            } else {
+                // Default: /status
+                STATUS_URL = `${window.location.protocol}//${window.location.host}/status`;
+            }
+        } else {
+            // Direct access - calculate status port (status server now on same port as web)
+            STATUS_URL = `http://${window.location.hostname}:${statusPort}/status`;
+        }
+        console.log('STATUS_URL:', STATUS_URL, '(port:', statusPort, ')');
 
         function formatNumber(num) {
             if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -737,6 +912,50 @@
         console.log('Starting status polling to:', STATUS_URL);
         pollStatus();
         setInterval(pollStatus, 5000);
+
+        // Feedback handling
+        const feedbackButtons = document.getElementById('feedback-buttons');
+        const feedbackSent = document.getElementById('feedback-sent');
+
+        document.querySelectorAll('.feedback-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rating = btn.dataset.rating;
+                const buttons = feedbackButtons.querySelectorAll('button');
+
+                // Disable buttons
+                buttons.forEach(b => b.disabled = true);
+
+                try {
+                    const feedbackUrl = STATUS_URL.replace('/status', '/status/feedback');
+                    const response = await fetch(feedbackUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ rating }),
+                    });
+
+                    if (response.ok) {
+                        // Show thank you message
+                        feedbackButtons.style.display = 'none';
+                        feedbackSent.style.display = 'block';
+
+                        // Reset after 3 seconds
+                        setTimeout(() => {
+                            feedbackButtons.style.display = 'flex';
+                            feedbackSent.style.display = 'none';
+                            buttons.forEach(b => b.disabled = false);
+                        }, 3000);
+                    } else {
+                        console.error('Feedback failed:', response.status);
+                        buttons.forEach(b => b.disabled = false);
+                    }
+                } catch (e) {
+                    console.error('Feedback error:', e);
+                    buttons.forEach(b => b.disabled = false);
+                }
+            });
+        });
     </script>
 </body>
 </html>

@@ -15,6 +15,7 @@ type Config struct {
 	Runtime       RuntimeConfig       `mapstructure:"runtime"`
 	Container     ContainerConfig     `mapstructure:"container"`
 	AWS           AWSConfig           `mapstructure:"aws"`
+	ECS           ECSConfig           `mapstructure:"ecs"`
 	Claude        ClaudeConfig        `mapstructure:"claude"`
 	GitHub        GitHubConfig        `mapstructure:"github"`
 	Notifications NotificationConfig  `mapstructure:"notifications"`
@@ -42,6 +43,12 @@ type AWSConfig struct {
 	DefaultProfile          string        `mapstructure:"defaultProfile"`
 	AutoLogin               bool          `mapstructure:"autoLogin"`
 	CredentialRefreshBuffer time.Duration `mapstructure:"credentialRefreshBuffer"`
+}
+
+// ECSConfig holds ECS deployment settings
+type ECSConfig struct {
+	Domain  string `mapstructure:"domain"`  // Domain name for ALB (e.g., frank.digitaldevops.io)
+	Cluster string `mapstructure:"cluster"` // ECS cluster name
 }
 
 // ClaudeConfig holds Claude Code settings
@@ -117,6 +124,10 @@ func DefaultConfig() *Config {
 			DefaultProfile:          "",
 			AutoLogin:               true,
 			CredentialRefreshBuffer: 5 * time.Minute,
+		},
+		ECS: ECSConfig{
+			Domain:  "frank.digitaldevops.io",
+			Cluster: "frank",
 		},
 		Claude: ClaudeConfig{
 			TokenEnvVar: "CLAUDE_ACCESS_TOKEN",
@@ -245,6 +256,8 @@ func setDefaults(cfg *Config) {
 	viper.SetDefault("aws.defaultProfile", cfg.AWS.DefaultProfile)
 	viper.SetDefault("aws.autoLogin", cfg.AWS.AutoLogin)
 	viper.SetDefault("aws.credentialRefreshBuffer", cfg.AWS.CredentialRefreshBuffer)
+	viper.SetDefault("ecs.domain", cfg.ECS.Domain)
+	viper.SetDefault("ecs.cluster", cfg.ECS.Cluster)
 	viper.SetDefault("claude.tokenEnvVar", cfg.Claude.TokenEnvVar)
 	viper.SetDefault("github.mountSSH", cfg.GitHub.MountSSH)
 	viper.SetDefault("github.mountGHConfig", cfg.GitHub.MountGHConfig)

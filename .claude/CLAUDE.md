@@ -2,7 +2,7 @@
 
 ## Profile System
 
-Frank uses a profile-based system for managing ECS tasks. Each profile represents a project/repository and gets its own subdomain.
+Frank uses a profile-based system for managing ECS tasks. Each profile represents a project/repository and gets its own URL path.
 
 ### Managing Profiles
 
@@ -25,11 +25,11 @@ Profiles are stored locally at `~/.config/frank/profiles.yaml` (Windows: `%APPDA
 ### Starting/Stopping Profile Tasks
 
 ```bash
-# Start a profile (creates subdomain routing automatically)
+# Start a profile (creates path-based routing automatically)
 frank ecs start myproject
 
 # The task will be accessible at:
-# https://myproject.frank.digitaldevops.io/claude/
+# https://frank.digitaldevops.io/myproject/
 
 # Stop a profile
 frank ecs stop myproject
@@ -107,7 +107,7 @@ frank ecs status
 
 ## Architecture
 
-- **ALB**: Routes traffic via host-based rules (`<profile>.frank.digitaldevops.io`)
+- **ALB**: Routes traffic via path-based rules (`/profile/*`)
 - **ECS Fargate**: Runs Frank containers with 4GB memory, 2 vCPU
 - **EFS**: Persistent storage at `/workspace` shared across tasks
 - **Secrets Manager**: Stores GitHub token and Claude credentials
@@ -118,5 +118,5 @@ frank ecs status
 ## URLs
 
 - Launch Page: `https://frank.digitaldevops.io/`
-- Profile Tasks: `https://<profile>.frank.digitaldevops.io/claude/`
+- Profile Tasks: `https://frank.digitaldevops.io/<profile>/`
 - API: `https://frank.digitaldevops.io/api/profiles`

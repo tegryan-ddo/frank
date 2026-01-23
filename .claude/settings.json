@@ -1,9 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(go mod tidy:*)",
-      "Bash(go build:*)",
-      "Bash(\"c:/Users/barff/Documents/autoclauto/frank.exe\" start --help)"
+      "Bash(*)",
+      "Bash(go get:*)"
     ]
   }
 }

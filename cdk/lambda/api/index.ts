@@ -13,8 +13,10 @@ import {
   ElasticLoadBalancingV2Client,
   DescribeTargetGroupsCommand,
   CreateTargetGroupCommand,
+  DeleteTargetGroupCommand,
   DescribeRulesCommand,
   CreateRuleCommand,
+  DeleteRuleCommand,
   RegisterTargetsCommand,
   DeregisterTargetsCommand,
   DescribeLoadBalancersCommand,
@@ -191,7 +193,7 @@ async function listProfiles(): Promise<ApiResponse> {
       ...p,
       status: running ? 'running' : 'stopped',
       taskId: running?.taskId,
-      url: `https://${p.name}.${DOMAIN}/claude/`,
+      url: `https://${DOMAIN}/${p.name}/`,
     };
   });
 
@@ -230,11 +232,59 @@ async function getInfrastructure(): Promise<{
   };
 }
 
-async function ensureTargetGroup(
+// Port definitions for profile routing
+const PORTS = {
+  wrapper: 7680,  // HTML wrapper with context panel
+  claude: 7681,   // Claude terminal (ttyd)
+  bash: 7682,     // Bash terminal (ttyd)
+  health: 7683,   // Health check endpoint
+};
+
+// Target group suffixes and their ports
+const TARGET_GROUP_CONFIGS = [
+  { suffix: '', port: PORTS.wrapper, pathSuffix: '' },      // Main wrapper
+  { suffix: '-t', port: PORTS.claude, pathSuffix: '/_t' },  // Claude terminal
+  { suffix: '-b', port: PORTS.bash, pathSuffix: '/_b' },    // Bash terminal
+];
+
+/**
+ * Delete a target group and any listener rules that reference it.
+ * This is needed when a target group has the wrong port (ports can't be modified).
+ */
+async function deleteTargetGroup(targetGroupArn: string): Promise<void> {
+  // Find and delete any listener rules that use this target group
+  const infra = await getInfrastructure();
+  const rulesResult = await elbClient.send(
+    new DescribeRulesCommand({ ListenerArn: infra.listenerArn })
+  );
+
+  for (const rule of rulesResult.Rules || []) {
+    // Skip the default rule (it can't be deleted)
+    if (rule.IsDefault) continue;
+
+    // Check if this rule forwards to our target group
+    const usesTargetGroup = rule.Actions?.some(
+      (action) => action.TargetGroupArn === targetGroupArn
+    );
+
+    if (usesTargetGroup && rule.RuleArn) {
+      console.log(`Deleting listener rule ${rule.RuleArn} that references target group`);
+      await elbClient.send(new DeleteRuleCommand({ RuleArn: rule.RuleArn }));
+    }
+  }
+
+  // Now delete the target group
+  console.log(`Deleting target group ${targetGroupArn}`);
+  await elbClient.send(new DeleteTargetGroupCommand({ TargetGroupArn: targetGroupArn }));
+}
+
+async function ensureTargetGroupWithPort(
   profileName: string,
-  vpcId: string
+  vpcId: string,
+  suffix: string,
+  port: number
 ): Promise<string> {
-  const tgName = `frank-profile-${profileName}`.substring(0, 32);
+  const tgName = `frank-profile-${profileName}${suffix}`.substring(0, 32);
 
   // Check if exists
   try {
@@ -242,7 +292,21 @@ async function ensureTargetGroup(
       new DescribeTargetGroupsCommand({ Names: [tgName] })
     );
     if (existing.TargetGroups?.[0]) {
-      return existing.TargetGroups[0].TargetGroupArn || '';
+      const existingTg = existing.TargetGroups[0];
+      const existingPort = existingTg.Port;
+
+      // If port matches, reuse the target group
+      if (existingPort === port) {
+        return existingTg.TargetGroupArn || '';
+      }
+
+      // Port mismatch - need to delete and recreate
+      // Target groups can't have their port modified, so we must recreate
+      console.log(`Target group ${tgName} has wrong port ${existingPort}, expected ${port}. Deleting and recreating.`);
+
+      // First, we need to delete any listener rules that reference this target group
+      // and deregister any targets, then delete the target group
+      await deleteTargetGroup(existingTg.TargetGroupArn || '');
     }
   } catch (error: any) {
     if (error.name !== 'TargetGroupNotFoundException') {
@@ -255,12 +319,12 @@ async function ensureTargetGroup(
     new CreateTargetGroupCommand({
       Name: tgName,
       Protocol: 'HTTP',
-      Port: 7681,
+      Port: port,
       VpcId: vpcId,
       TargetType: 'ip',
       HealthCheckEnabled: true,
       HealthCheckPath: '/health',
-      HealthCheckPort: '7683',
+      HealthCheckPort: String(PORTS.health),
       HealthCheckProtocol: 'HTTP',
       HealthCheckIntervalSeconds: 30,
       HealthCheckTimeoutSeconds: 10,
@@ -274,13 +338,42 @@ async function ensureTargetGroup(
   return result.TargetGroups?.[0]?.TargetGroupArn || '';
 }
 
-async function ensureListenerRule(
-  profileName: string,
-  listenerArn: string,
-  targetGroupArn: string
-): Promise<void> {
-  const hostHeader = `${profileName}.${DOMAIN}`;
+interface TargetGroupInfo {
+  arn: string;
+  port: number;
+  pathSuffix: string;
+}
 
+async function ensureAllTargetGroups(
+  profileName: string,
+  vpcId: string
+): Promise<TargetGroupInfo[]> {
+  const results: TargetGroupInfo[] = [];
+
+  for (const config of TARGET_GROUP_CONFIGS) {
+    const arn = await ensureTargetGroupWithPort(
+      profileName,
+      vpcId,
+      config.suffix,
+      config.port
+    );
+    results.push({
+      arn,
+      port: config.port,
+      pathSuffix: config.pathSuffix,
+    });
+  }
+
+  return results;
+}
+
+async function ensureListenerRuleWithPriority(
+  listenerArn: string,
+  profileName: string,
+  targetGroupArn: string,
+  pathPatterns: string[],
+  priority: number
+): Promise<void> {
   // Check if rule exists
   const rulesResult = await elbClient.send(
     new DescribeRulesCommand({ ListenerArn: listenerArn })
@@ -288,35 +381,106 @@ async function ensureListenerRule(
 
   for (const rule of rulesResult.Rules || []) {
     for (const cond of rule.Conditions || []) {
-      if (cond.HostHeaderConfig?.Values?.includes(hostHeader)) {
+      if (cond.PathPatternConfig?.Values?.includes(pathPatterns[0])) {
         return; // Rule already exists
       }
     }
   }
 
-  // Calculate priority from hash
-  const priority = 100 + (hashCode(profileName) % 900);
+  // Create rule with path-based routing
+  try {
+    await elbClient.send(
+      new CreateRuleCommand({
+        ListenerArn: listenerArn,
+        Priority: priority,
+        Conditions: [
+          {
+            Field: 'path-pattern',
+            PathPatternConfig: { Values: pathPatterns },
+          },
+        ],
+        Actions: [
+          {
+            Type: 'forward',
+            TargetGroupArn: targetGroupArn,
+          },
+        ],
+        Tags: [{ Key: 'frank-profile', Value: profileName }],
+      })
+    );
+  } catch (error: any) {
+    // Handle priority conflict by trying nearby priorities
+    if (error.name === 'PriorityInUseException') {
+      for (let i = 1; i <= 5; i++) {
+        try {
+          await elbClient.send(
+            new CreateRuleCommand({
+              ListenerArn: listenerArn,
+              Priority: priority + i,
+              Conditions: [
+                {
+                  Field: 'path-pattern',
+                  PathPatternConfig: { Values: pathPatterns },
+                },
+              ],
+              Actions: [
+                {
+                  Type: 'forward',
+                  TargetGroupArn: targetGroupArn,
+                },
+              ],
+              Tags: [{ Key: 'frank-profile', Value: profileName }],
+            })
+          );
+          return;
+        } catch (retryError: any) {
+          if (retryError.name !== 'PriorityInUseException') {
+            throw retryError;
+          }
+        }
+      }
+    }
+    throw error;
+  }
+}
 
-  // Create rule
-  await elbClient.send(
-    new CreateRuleCommand({
-      ListenerArn: listenerArn,
-      Priority: priority,
-      Conditions: [
-        {
-          Field: 'host-header',
-          HostHeaderConfig: { Values: [hostHeader] },
-        },
-      ],
-      Actions: [
-        {
-          Type: 'forward',
-          TargetGroupArn: targetGroupArn,
-        },
-      ],
-      Tags: [{ Key: 'frank-profile', Value: profileName }],
-    })
-  );
+async function ensureAllListenerRules(
+  listenerArn: string,
+  profileName: string,
+  targetGroups: TargetGroupInfo[]
+): Promise<void> {
+  // Calculate base priority from hash (100-800 range to leave room for 3 rules)
+  const basePriority = 100 + (hashCode(profileName) % 700);
+
+  // Create rules in order of specificity (most specific first = lower priority number)
+  // Priority order: _t (Claude terminal) < _b (Bash terminal) < wrapper (catch-all)
+  for (let i = 0; i < targetGroups.length; i++) {
+    const tg = targetGroups[i];
+    let pathPatterns: string[];
+    let priorityOffset: number;
+
+    if (tg.pathSuffix === '/_t') {
+      // Claude terminal: /{profile}/_t and /{profile}/_t/*
+      pathPatterns = [`/${profileName}/_t`, `/${profileName}/_t/*`];
+      priorityOffset = 0; // Highest priority (lowest number)
+    } else if (tg.pathSuffix === '/_b') {
+      // Bash terminal: /{profile}/_b and /{profile}/_b/*
+      pathPatterns = [`/${profileName}/_b`, `/${profileName}/_b/*`];
+      priorityOffset = 1;
+    } else {
+      // Wrapper: /{profile} and /{profile}/* (catch-all, lowest priority)
+      pathPatterns = [`/${profileName}`, `/${profileName}/*`];
+      priorityOffset = 2;
+    }
+
+    await ensureListenerRuleWithPriority(
+      listenerArn,
+      profileName,
+      tg.arn,
+      pathPatterns,
+      basePriority + priorityOffset
+    );
+  }
 }
 
 function hashCode(str: string): number {
@@ -351,7 +515,7 @@ async function startProfile(profileName: string): Promise<ApiResponse> {
       body: JSON.stringify({
         message: 'Profile already running',
         taskId: task.taskId,
-        url: `https://${profileName}.${DOMAIN}/claude/`,
+        url: `https://${DOMAIN}/${profileName}/`,
       }),
     };
   }
@@ -359,9 +523,9 @@ async function startProfile(profileName: string): Promise<ApiResponse> {
   // Get infrastructure
   const infra = await getInfrastructure();
 
-  // Ensure ALB infrastructure
-  const tgArn = await ensureTargetGroup(profileName, infra.vpcId);
-  await ensureListenerRule(profileName, infra.listenerArn, tgArn);
+  // Ensure ALB infrastructure (3 target groups and 3 listener rules per profile)
+  const targetGroups = await ensureAllTargetGroups(profileName, infra.vpcId);
+  await ensureAllListenerRules(infra.listenerArn, profileName, targetGroups);
 
   // Get task definition from service
   const descServices = await ecsClient.send(
@@ -392,6 +556,7 @@ async function startProfile(profileName: string): Promise<ApiResponse> {
               { name: 'CONTAINER_NAME', value: profileName },
               { name: 'GIT_REPO', value: profile.repo },
               { name: 'GIT_BRANCH', value: profile.branch || 'main' },
+              { name: 'URL_PREFIX', value: `/${profileName}` },
             ],
           },
         ],
@@ -409,20 +574,71 @@ async function startProfile(profileName: string): Promise<ApiResponse> {
   }
 
   const taskId = task.taskArn?.split('/').pop() || '';
+  const taskArn = task.taskArn || '';
 
-  // Register target asynchronously (task needs IP first)
-  // In practice, the task will be registered when it becomes healthy
-  // or we could poll for IP and register
+  // Poll for task IP and register with target group
+  // Wait up to 60 seconds for task to get an IP
+  let taskIp = '';
+  for (let i = 0; i < 12; i++) {
+    await sleep(5000);
+
+    const descResult = await ecsClient.send(
+      new DescribeTasksCommand({
+        cluster: CLUSTER,
+        tasks: [taskArn],
+      })
+    );
+
+    const taskInfo = descResult.tasks?.[0];
+    if (taskInfo?.lastStatus === 'STOPPED') {
+      throw new Error('Task stopped unexpectedly');
+    }
+
+    // Extract IP from attachments
+    for (const att of taskInfo?.attachments || []) {
+      if (att.type === 'ElasticNetworkInterface') {
+        const ipDetail = att.details?.find(
+          (d: KeyValuePair) => d.name === 'privateIPv4Address'
+        );
+        if (ipDetail?.value) {
+          taskIp = ipDetail.value;
+          break;
+        }
+      }
+    }
+
+    if (taskIp) break;
+  }
+
+  if (taskIp) {
+    // Register task IP with all three target groups (wrapper, claude terminal, bash terminal)
+    for (const tg of targetGroups) {
+      await elbClient.send(
+        new RegisterTargetsCommand({
+          TargetGroupArn: tg.arn,
+          Targets: [{ Id: taskIp, Port: tg.port }],
+        })
+      );
+      console.log(`Registered target ${taskIp}:${tg.port} with target group`);
+    }
+  } else {
+    console.warn('Could not get task IP within timeout, targets not registered');
+  }
 
   return {
     statusCode: 200,
     headers: corsHeaders,
     body: JSON.stringify({
-      message: 'Profile starting',
+      message: taskIp ? 'Profile started' : 'Profile starting (target registration pending)',
       taskId,
-      url: `https://${profileName}.${DOMAIN}/claude/`,
+      taskIp,
+      url: `https://${DOMAIN}/${profileName}/`,
     }),
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function stopProfile(profileName: string): Promise<ApiResponse> {
@@ -439,23 +655,26 @@ async function stopProfile(profileName: string): Promise<ApiResponse> {
     };
   }
 
-  // Deregister from target group
-  try {
-    const tgName = `frank-profile-${profileName}`.substring(0, 32);
-    const tgResult = await elbClient.send(
-      new DescribeTargetGroupsCommand({ Names: [tgName] })
-    );
-    const tgArn = tgResult.TargetGroups?.[0]?.TargetGroupArn;
-    if (tgArn && task.ip) {
-      await elbClient.send(
-        new DeregisterTargetsCommand({
-          TargetGroupArn: tgArn,
-          Targets: [{ Id: task.ip, Port: 7681 }],
-        })
+  // Deregister from all three target groups (wrapper, claude terminal, bash terminal)
+  for (const config of TARGET_GROUP_CONFIGS) {
+    try {
+      const tgName = `frank-profile-${profileName}${config.suffix}`.substring(0, 32);
+      const tgResult = await elbClient.send(
+        new DescribeTargetGroupsCommand({ Names: [tgName] })
       );
+      const tgArn = tgResult.TargetGroups?.[0]?.TargetGroupArn;
+      if (tgArn && task.ip) {
+        await elbClient.send(
+          new DeregisterTargetsCommand({
+            TargetGroupArn: tgArn,
+            Targets: [{ Id: task.ip, Port: config.port }],
+          })
+        );
+        console.log(`Deregistered target ${task.ip}:${config.port} from ${tgName}`);
+      }
+    } catch (error) {
+      console.warn(`Failed to deregister target from ${config.suffix || 'main'} target group:`, error);
     }
-  } catch (error) {
-    console.warn('Failed to deregister target:', error);
   }
 
   // Stop task
@@ -644,7 +863,7 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         document.getElementById('profiles').style.display = 'none';
         document.getElementById('empty').style.display = 'none';
         document.getElementById('error').style.display = 'none';
-        const response = await fetch(API_BASE + '/profiles');
+        const response = await fetch(API_BASE + '/profiles', { credentials: 'include' });
         if (!response.ok) throw new Error('Failed to fetch profiles');
         const data = await response.json();
         profiles = data.profiles || [];
@@ -689,7 +908,7 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       btn.disabled = true;
       btn.textContent = 'Starting...';
       try {
-        const response = await fetch(API_BASE + '/profiles/' + name + '/start', { method: 'POST' });
+        const response = await fetch(API_BASE + '/profiles/' + name + '/start', { method: 'POST', credentials: 'include' });
         if (!response.ok) {
           const data = await response.json();
           throw new Error(data.error || 'Failed to start profile');
@@ -707,7 +926,7 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       btn.disabled = true;
       btn.textContent = 'Stopping...';
       try {
-        const response = await fetch(API_BASE + '/profiles/' + name + '/stop', { method: 'POST' });
+        const response = await fetch(API_BASE + '/profiles/' + name + '/stop', { method: 'POST', credentials: 'include' });
         if (!response.ok) {
           const data = await response.json();
           throw new Error(data.error || 'Failed to stop profile');

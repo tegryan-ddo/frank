@@ -1,103 +1,115 @@
 # /deploy - Deploy Frank to AWS ECS
 
-Deploy Frank to AWS ECS using AWS Copilot. This command handles the full deployment workflow including environment setup, secrets configuration, service deployment, and DNS setup.
+Deploy Frank to AWS ECS using AWS CDK. This command handles the full deployment workflow including infrastructure provisioning, secrets configuration, and service deployment.
 
 ## Arguments
 
-- `$ARGUMENTS` - Optional: action and environment (e.g., "full dev", "service prod", "dns")
+- `$ARGUMENTS` - Optional: action (e.g., "deploy", "secrets", "status")
 
 ## Actions
 
 | Action | Description |
 |--------|-------------|
-| `full` | Full deployment: init → env → secrets → deploy → dns (default) |
-| `init` | Initialize Copilot application |
-| `env` | Deploy environment infrastructure |
-| `secrets` | Configure secrets in AWS Secrets Manager |
-| `service` | Deploy the frank service |
-| `dns` | Set up Route 53 DNS record |
+| `deploy` | Deploy/update infrastructure and service (default) |
+| `bootstrap` | One-time CDK bootstrap for AWS account |
+| `secrets` | Configure GitHub and Claude secrets |
 | `status` | Check deployment status |
 | `logs` | Stream service logs |
-| `pipeline` | Set up CI/CD pipeline |
+| `destroy` | Destroy all infrastructure |
 
 ## Instructions
 
-Parse the arguments to determine action and environment:
-- Default action: `full`
-- Default environment: `dev`
-- Example: `/deploy service prod` → action=service, env=prod
+Parse the arguments to determine action:
+- Default action: `deploy`
+- Example: `/deploy secrets` → action=secrets
 
 ### Configuration
 
 ```
 Project Root: c:\Users\barff\Documents\autoclauto
+CDK Directory: c:\Users\barff\Documents\autoclauto\cdk
 Domain: frank.digitaldevops.io
 Route 53 Hosted Zone: Z3OKT7D3Q3TASV
 ACM Certificate: arn:aws:acm:us-east-1:882384879235:certificate/772d185a-9f1f-43d8-b20f-5c82c11f1b01
 AWS Region: us-east-1
 ```
 
-### Full Deployment Steps
+### First-Time Setup
 
 1. **Check prerequisites**
    ```bash
-   copilot --version
+   node --version
    aws sts get-caller-identity
    ```
 
-2. **Initialize Copilot** (if needed)
+2. **Install CDK dependencies**
    ```bash
-   cd "c:\Users\barff\Documents\autoclauto"
-   copilot app init frank --domain frank.digitaldevops.io
-   copilot env init --name $ENV --default-config
-   copilot svc init --name frank
+   cd "c:\Users\barff\Documents\autoclauto\cdk"
+   npm install
    ```
 
-3. **Deploy environment**
+3. **Bootstrap CDK** (one-time per AWS account/region)
    ```bash
-   copilot env deploy --name $ENV
+   npx cdk bootstrap
    ```
 
-4. **Configure secrets** (uses `copilot secret init`)
+4. **Deploy infrastructure**
+   ```bash
+   npx cdk deploy --require-approval never
+   ```
+
+5. **Configure secrets**
    - Get GitHub token via `gh auth token`
-   - Read Claude credentials from `~/.claude/.credentials.json` or `$env:USERPROFILE\.claude\.credentials.json`
-   - Create secrets:
+   - Read Claude credentials from `~/.claude/.credentials.json`
    ```bash
-   copilot secret init --name GITHUB_TOKEN --values "$ENV=$(gh auth token)" --overwrite
-   copilot secret init --name CLAUDE_CREDENTIALS --values "$ENV=$(cat ~/.claude/.credentials.json)" --overwrite
+   aws secretsmanager put-secret-value --secret-id /frank/github-token --secret-string "$(gh auth token)"
+   aws secretsmanager put-secret-value --secret-id /frank/claude-credentials --secret-string "$(cat ~/.claude/.credentials.json)"
    ```
 
-5. **Deploy service**
+6. **Verify**
    ```bash
-   copilot svc deploy --name frank --env $ENV
+   aws ecs describe-services --cluster frank --services frank
    ```
 
-6. **Set up DNS**
-   - Get ALB info: `copilot svc show --name frank --env $ENV --json`
-   - Create Route 53 alias record for frank.digitaldevops.io pointing to ALB
+### Using the Deploy Script
 
-7. **Verify**
-   ```bash
-   copilot svc status --name frank --env $ENV
-   ```
+PowerShell:
+```powershell
+.\cdk\deploy.ps1 bootstrap   # First-time setup
+.\cdk\deploy.ps1 deploy      # Deploy infrastructure
+.\cdk\deploy.ps1 secrets     # Configure credentials
+.\cdk\deploy.ps1 status      # Check status
+.\cdk\deploy.ps1 logs        # Stream logs
+```
+
+Bash:
+```bash
+./cdk/deploy.sh bootstrap
+./cdk/deploy.sh deploy
+./cdk/deploy.sh secrets
+```
 
 ### Individual Actions
 
-**init**: Initialize Copilot app, environment, and service manifests
+**bootstrap**: One-time CDK setup - creates staging bucket and roles in AWS
 
-**env**: Deploy CloudFormation stacks for VPC, ALB, ECS cluster
+**deploy**: Synthesize CloudFormation template and deploy stack including:
+- VPC with public/private subnets
+- ECS Fargate cluster
+- EFS file system for persistent storage
+- Application Load Balancer with HTTPS
+- Route 53 DNS record
+- Secrets Manager secrets
 
-**secrets**: Prompt for or auto-detect GitHub token and Claude credentials, store in Secrets Manager
+**secrets**: Auto-detect and upload:
+- GitHub token (from `gh auth token`)
+- Claude credentials (from `~/.claude/.credentials.json`)
 
-**service**: Build Docker image, push to ECR, deploy ECS task
+**status**: Show ECS service health and task status
 
-**dns**: Get ALB DNS name from Copilot, create/update Route 53 A record alias
+**logs**: Stream CloudWatch logs from `/ecs/frank`
 
-**status**: Show service health, task status, and URL
-
-**logs**: Stream CloudWatch logs with `--follow`
-
-**pipeline**: Run `copilot pipeline init` and `copilot pipeline deploy`
+**destroy**: Delete all infrastructure (with confirmation)
 
 ### Output
 
@@ -105,3 +117,4 @@ Report results including:
 - Service URL (https://frank.digitaldevops.io)
 - Deployment status
 - Any errors or warnings
+- Secret ARNs if secrets need updating

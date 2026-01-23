@@ -138,7 +138,7 @@ func runECSStart(cmd *cobra.Command, args []string) error {
 	if existingTask != "" {
 		fmt.Printf("Profile %q is already running\n\n", profileName)
 		fmt.Printf("  Task ID: %s\n", color.CyanString(existingTask))
-		fmt.Printf("  URL:     %s\n", color.CyanString(fmt.Sprintf("https://%s.frank.digitaldevops.io/claude/", profileName)))
+		fmt.Printf("  URL:     %s\n", color.CyanString(fmt.Sprintf("https://frank.digitaldevops.io/%s/", profileName)))
 		fmt.Println()
 		fmt.Printf("Use 'frank ecs stop %s' to stop it first\n", profileName)
 		return nil
@@ -202,6 +202,7 @@ func runECSStart(cmd *cobra.Command, args []string) error {
 					{Name: aws.String("CONTAINER_NAME"), Value: aws.String(profileName)},
 					{Name: aws.String("GIT_REPO"), Value: aws.String(p.Repo)},
 					{Name: aws.String("GIT_BRANCH"), Value: aws.String(branch)},
+					{Name: aws.String("URL_PREFIX"), Value: aws.String("/" + profileName)},
 				},
 			},
 		},
@@ -245,7 +246,7 @@ func runECSStart(cmd *cobra.Command, args []string) error {
 	} else {
 		// Register task in target group
 		fmt.Printf("  Registering task in target group...\n")
-		if err := albMgr.RegisterTarget(ctx, tgArn, taskIP, alb.ClaudePort); err != nil {
+		if err := albMgr.RegisterTarget(ctx, tgArn, taskIP, alb.TargetPort); err != nil {
 			fmt.Printf("  Warning: Failed to register target: %v\n", err)
 		}
 	}
@@ -254,7 +255,7 @@ func runECSStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Task ID:    %s\n", color.CyanString(taskID))
 	fmt.Printf("  Repository: %s\n", p.Repo)
 	fmt.Printf("  Branch:     %s\n", branch)
-	fmt.Printf("  URL:        %s\n", color.CyanString(fmt.Sprintf("https://%s.frank.digitaldevops.io/claude/", profileName)))
+	fmt.Printf("  URL:        %s\n", color.CyanString(fmt.Sprintf("https://frank.digitaldevops.io/%s/", profileName)))
 	fmt.Println()
 	fmt.Printf("Note: It may take 1-2 minutes for the task to become healthy\n")
 	fmt.Printf("Use 'frank ecs logs %s' to view logs\n", taskID)
@@ -552,7 +553,7 @@ func runECSStop(cmd *cobra.Command, args []string) error {
 		if err == nil && taskIP != "" {
 			tgArn, err := albMgr.GetTargetGroupArn(ctx, arg)
 			if err == nil {
-				_ = albMgr.DeregisterTarget(ctx, tgArn, taskIP, alb.ClaudePort)
+				_ = albMgr.DeregisterTarget(ctx, tgArn, taskIP, alb.TargetPort)
 			}
 		}
 	} else {

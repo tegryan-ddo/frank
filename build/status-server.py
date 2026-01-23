@@ -2,6 +2,7 @@
 """
 Enhanced status server that exposes Claude Code usage info.
 Reads from Claude's project files and serves detailed metrics via HTTP.
+Also captures prompts and uploads to S3 for analytics.
 """
 
 import json
@@ -9,12 +10,67 @@ import os
 import glob
 import time
 import sys
+import re
+import threading
+import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from datetime import datetime
+from collections import deque
 
-STATUS_PORT = int(os.environ.get('STATUS_PORT', 7683))
+# Try to import boto3 for S3 uploads (optional)
+try:
+    import boto3
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
+
+# Server configuration
+# Now serves on WEB_PORT (7680) and handles both status API and static files
+WEB_PORT = int(os.environ.get('WEB_PORT', 7680))
+STATUS_PORT = int(os.environ.get('STATUS_PORT', 7683))  # Keep for backwards compat
 LOG_FILE = '/tmp/status-server.log'
+
+# Static file serving configuration
+WEB_DIR = os.environ.get('WEB_DIR', '/tmp/frank-web')
+URL_PREFIX = os.environ.get('URL_PREFIX', '')  # e.g., '/enkai' for profile routing
+
+# MIME types for static file serving
+MIME_TYPES = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+}
+
+# Analytics configuration
+ANALYTICS_BUCKET = os.environ.get('ANALYTICS_BUCKET', '')
+ANALYTICS_ENABLED = os.environ.get('ANALYTICS_ENABLED', 'false').lower() == 'true'
+CONTAINER_NAME = os.environ.get('CONTAINER_NAME', 'unknown')
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+
+# Buffer for prompts before S3 upload
+prompt_buffer = deque(maxlen=100)
+prompt_buffer_lock = threading.Lock()
+last_upload_time = time.time()
+UPLOAD_INTERVAL = 60  # Upload every 60 seconds
+MAX_BUFFER_SIZE = 10  # Or when buffer reaches this size
+
+# Track processed prompts to avoid duplicates
+processed_prompt_ids = set()
+
+# Current session info
+current_session_id = str(uuid.uuid4())[:8]
+last_prompt_id = None
 
 def log(msg):
     """Write to log file for debugging."""
@@ -23,6 +79,70 @@ def log(msg):
             f.write(f"{datetime.now().isoformat()} - {msg}\n")
     except:
         pass
+
+def check_port(port, timeout=2):
+    """Check if a service is listening on a port."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        result = s.connect_ex(('localhost', port))
+        s.close()
+        return result == 0
+    except:
+        return False
+
+def get_health_status():
+    """Get comprehensive health status checking all services."""
+    ttyd_port = int(os.environ.get('TTYD_PORT', 7681))
+    bash_port = int(os.environ.get('BASH_PORT', 7682))
+
+    checks = {
+        'web_server': True,  # We're responding, so yes
+        'claude_terminal': check_port(ttyd_port),
+        'bash_terminal': check_port(bash_port),
+    }
+
+    all_healthy = all(checks.values())
+    return {
+        'status': 'ok' if all_healthy else 'degraded',
+        'checks': checks,
+    }
+
+def serve_static_file(handler, file_path):
+    """Serve a static file with proper MIME type."""
+    try:
+        # Ensure path is within WEB_DIR (security)
+        abs_path = os.path.abspath(file_path)
+        abs_web_dir = os.path.abspath(WEB_DIR)
+        if not abs_path.startswith(abs_web_dir):
+            handler.send_response(403)
+            handler.end_headers()
+            return
+
+        if not os.path.exists(file_path):
+            handler.send_response(404)
+            handler.end_headers()
+            return
+
+        # Get MIME type
+        ext = os.path.splitext(file_path)[1].lower()
+        content_type = MIME_TYPES.get(ext, 'application/octet-stream')
+
+        # Read and serve file
+        with open(file_path, 'rb') as f:
+            content = f.read()
+
+        handler.send_response(200)
+        handler.send_header('Content-Type', content_type)
+        handler.send_header('Content-Length', len(content))
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        handler.wfile.write(content)
+    except Exception as e:
+        log(f"Error serving static file {file_path}: {e}")
+        handler.send_response(500)
+        handler.end_headers()
 
 # Model pricing (per million tokens)
 MODEL_PRICING = {
@@ -44,41 +164,122 @@ class StatusHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            if self.path == '/status':
+            # Normalize path and strip URL prefix if configured
+            path = self.path.split('?')[0]  # Remove query string
+
+            # Strip URL_PREFIX from path for static file serving
+            # e.g., /enkai/ -> /, /enkai/something -> /something
+            if URL_PREFIX and path.startswith(URL_PREFIX):
+                path = path[len(URL_PREFIX):] or '/'
+
+            # API endpoints (check these first)
+            if path == '/status':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-
                 status = get_claude_status()
                 self.wfile.write(json.dumps(status).encode())
-            elif self.path == '/status/detailed':
+                return
+
+            if path == '/status/detailed':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-
                 status = get_detailed_status()
                 self.wfile.write(json.dumps(status).encode())
-            elif self.path == '/status/debug':
+                return
+
+            if path == '/status/debug':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-
                 debug = get_debug_info()
                 self.wfile.write(json.dumps(debug, indent=2).encode())
-            elif self.path == '/health':
+                return
+
+            if path == '/health':
+                health = get_health_status()
+                # Return 200 even if degraded (for ALB health checks)
+                # but include detailed status in response
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-                self.wfile.write(json.dumps({'status': 'ok'}).encode())
-            else:
-                self.send_response(404)
+                self.wfile.write(json.dumps(health).encode())
+                return
+
+            # Static file serving
+            # Handle directory requests (serve index.html)
+            if path == '/' or path == '':
+                path = '/index.html'
+
+            # Security: prevent directory traversal
+            if '..' in path:
+                self.send_response(403)
                 self.end_headers()
+                return
+
+            # Build file path
+            file_path = os.path.join(WEB_DIR, path.lstrip('/'))
+
+            # If path is a directory, serve index.html
+            if os.path.isdir(file_path):
+                file_path = os.path.join(file_path, 'index.html')
+
+            # Serve the static file
+            serve_static_file(self, file_path)
+
         except Exception as e:
             log(f"Error handling request {self.path}: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode())
+
+    def do_POST(self):
+        """Handle POST requests for feedback."""
+        try:
+            if self.path == '/status/feedback':
+                # Read request body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+
+                try:
+                    data = json.loads(body)
+                    rating = data.get('rating', 'neutral')
+                    prompt_id = data.get('prompt_id')
+
+                    # Validate rating
+                    if rating not in ('positive', 'negative', 'neutral'):
+                        rating = 'neutral'
+
+                    # Save feedback
+                    success = save_feedback(prompt_id, rating)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': success,
+                        'message': 'Feedback recorded' if success else 'Analytics not enabled'
+                    }).encode())
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode())
+            else:
+                self.send_response(404)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+        except Exception as e:
+            log(f"Error handling POST request {self.path}: {e}")
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -88,7 +289,8 @@ class StatusHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
 def find_jsonl_files(base_dir):
@@ -665,11 +867,300 @@ def simplify_model_name(model):
         # Return last part of model name, truncated
         return model.split('/')[-1][:20]
 
+
+# =========================================================================
+# Analytics Functions
+# =========================================================================
+
+def filter_pii(text):
+    """Remove potential PII from text."""
+    if not text:
+        return text
+
+    # Email addresses
+    text = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '[EMAIL]', text)
+
+    # AWS account IDs (12 digits)
+    text = re.sub(r'\b\d{12}\b', '[AWS_ACCOUNT]', text)
+
+    # API keys and tokens (long alphanumeric strings)
+    text = re.sub(r'(?:api[_-]?key|token|secret|password|credential)["\s:=]+["\']?([a-zA-Z0-9_-]{20,})["\']?',
+                  r'[REDACTED_KEY]', text, flags=re.IGNORECASE)
+
+    # Generic long secrets
+    text = re.sub(r'[a-zA-Z0-9]{40,}', '[REDACTED]', text)
+
+    # File paths with usernames (Unix)
+    text = re.sub(r'/Users/[^/\s]+/', '/Users/[USER]/', text)
+    text = re.sub(r'/home/[^/\s]+/', '/home/[USER]/', text)
+
+    # Windows paths with usernames
+    text = re.sub(r'C:\\Users\\[^\\]+\\', 'C:\\Users\\[USER]\\', text)
+
+    return text
+
+
+def extract_user_prompts(filepath):
+    """Extract user prompts from a JSONL conversation file."""
+    global processed_prompt_ids
+    prompts = []
+    turn_number = 0
+
+    try:
+        with open(filepath) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    entry_type = entry.get('type', '')
+                    role = entry.get('role', '')
+
+                    # Check if this is a user message
+                    if entry_type in ('user', 'human') or role in ('user', 'human'):
+                        turn_number += 1
+
+                        # Generate a unique ID for this prompt
+                        prompt_text = extract_text_content(entry)
+                        prompt_id = f"{filepath.stem}_{turn_number}"
+
+                        # Skip if already processed
+                        if prompt_id in processed_prompt_ids:
+                            continue
+
+                        processed_prompt_ids.add(prompt_id)
+
+                        # Filter PII
+                        filtered_text = filter_pii(prompt_text)
+
+                        prompt_record = {
+                            'id': str(uuid.uuid4()),
+                            'profile': CONTAINER_NAME,
+                            'session_id': current_session_id,
+                            'timestamp': entry.get('timestamp', datetime.now().isoformat()),
+                            'prompt': {
+                                'text': filtered_text,
+                                'tokens': len(filtered_text.split()),  # Rough estimate
+                            },
+                            'context': {
+                                'turn_number': turn_number,
+                                'model': None,  # Will be filled later
+                                'files_referenced': [],
+                            },
+                            'outcome': {
+                                'next_turn_count': 0,
+                                'tools_used': [],
+                                'total_output_tokens': 0,
+                            },
+                        }
+                        prompts.append(prompt_record)
+
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        log(f"Error extracting prompts: {e}")
+
+    return prompts
+
+
+def extract_text_content(entry):
+    """Extract text content from various message formats."""
+    # Direct text field
+    if 'text' in entry:
+        return entry['text']
+
+    # Content field (string)
+    if 'content' in entry:
+        content = entry['content']
+        if isinstance(content, str):
+            return content
+        # Content array
+        if isinstance(content, list):
+            texts = []
+            for block in content:
+                if isinstance(block, str):
+                    texts.append(block)
+                elif isinstance(block, dict):
+                    if block.get('type') == 'text':
+                        texts.append(block.get('text', ''))
+            return ' '.join(texts)
+
+    # Message.content
+    if 'message' in entry and isinstance(entry['message'], dict):
+        return extract_text_content(entry['message'])
+
+    return ''
+
+
+def buffer_prompt(prompt_record):
+    """Add a prompt to the buffer and trigger upload if needed."""
+    global last_upload_time
+
+    with prompt_buffer_lock:
+        prompt_buffer.append(prompt_record)
+
+        # Check if we should upload
+        should_upload = (
+            len(prompt_buffer) >= MAX_BUFFER_SIZE or
+            time.time() - last_upload_time > UPLOAD_INTERVAL
+        )
+
+        if should_upload:
+            upload_buffered_prompts()
+
+
+def upload_buffered_prompts():
+    """Upload buffered prompts to S3."""
+    global last_upload_time
+
+    if not ANALYTICS_ENABLED or not ANALYTICS_BUCKET or not HAS_BOTO3:
+        return
+
+    with prompt_buffer_lock:
+        if not prompt_buffer:
+            return
+
+        prompts_to_upload = list(prompt_buffer)
+        prompt_buffer.clear()
+        last_upload_time = time.time()
+
+    # Upload in background
+    def do_upload():
+        try:
+            s3 = boto3.client('s3', region_name=AWS_REGION)
+
+            now = datetime.now()
+            profile = CONTAINER_NAME or 'unknown'
+
+            # S3 key: prompts/{profile}/{year}/{month}/{day}/{session}_{timestamp}.json
+            key = f"prompts/{profile}/{now.year}/{now.month:02d}/{now.day:02d}/{current_session_id}_{int(now.timestamp())}.json"
+
+            body = json.dumps(prompts_to_upload, indent=2)
+
+            s3.put_object(
+                Bucket=ANALYTICS_BUCKET,
+                Key=key,
+                Body=body,
+                ContentType='application/json'
+            )
+
+            log(f"Uploaded {len(prompts_to_upload)} prompts to s3://{ANALYTICS_BUCKET}/{key}")
+        except Exception as e:
+            log(f"Error uploading prompts to S3: {e}")
+
+    threading.Thread(target=do_upload, daemon=True).start()
+
+
+def save_feedback(prompt_id, rating):
+    """Save feedback to S3."""
+    global last_prompt_id
+
+    if not ANALYTICS_ENABLED or not ANALYTICS_BUCKET or not HAS_BOTO3:
+        return False
+
+    try:
+        s3 = boto3.client('s3', region_name=AWS_REGION)
+
+        now = datetime.now()
+        profile = CONTAINER_NAME or 'unknown'
+
+        feedback_record = {
+            'prompt_id': prompt_id or last_prompt_id or 'unknown',
+            'profile': profile,
+            'timestamp': now.isoformat(),
+            'rating': rating,
+            'context': {
+                'session_id': current_session_id,
+            }
+        }
+
+        # S3 key: feedback/{profile}/{year}/{month}/{day}/feedback_{timestamp}.json
+        key = f"feedback/{profile}/{now.year}/{now.month:02d}/{now.day:02d}/feedback_{int(now.timestamp())}.json"
+
+        s3.put_object(
+            Bucket=ANALYTICS_BUCKET,
+            Key=key,
+            Body=json.dumps(feedback_record, indent=2),
+            ContentType='application/json'
+        )
+
+        log(f"Saved feedback to s3://{ANALYTICS_BUCKET}/{key}")
+        return True
+    except Exception as e:
+        log(f"Error saving feedback to S3: {e}")
+        return False
+
+
+def scan_and_capture_prompts():
+    """Background task to periodically scan for new prompts."""
+    while True:
+        try:
+            if ANALYTICS_ENABLED:
+                home = Path.home()
+                claude_dir = home / '.claude'
+
+                conversation_files = find_jsonl_files(claude_dir)
+                for filepath in conversation_files:
+                    prompts = extract_user_prompts(filepath)
+                    for prompt in prompts:
+                        buffer_prompt(prompt)
+
+                # Force upload if there's anything in the buffer
+                if prompt_buffer:
+                    upload_buffered_prompts()
+        except Exception as e:
+            log(f"Error in prompt capture: {e}")
+
+        # Scan every 30 seconds
+        time.sleep(30)
+
+
+class HealthOnlyHandler(BaseHTTPRequestHandler):
+    """Simple health check handler for the dedicated health port."""
+    def log_message(self, format, *args):
+        pass  # Suppress logging
+
+    def do_GET(self):
+        if self.path == '/health' or self.path == '/':
+            health = get_health_status()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(health).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+def run_health_server():
+    """Run a dedicated health check server on STATUS_PORT (7683)."""
+    try:
+        health_server = HTTPServer(('0.0.0.0', STATUS_PORT), HealthOnlyHandler)
+        log(f"Health server started on port {STATUS_PORT}")
+        health_server.serve_forever()
+    except Exception as e:
+        log(f"Error starting health server on port {STATUS_PORT}: {e}")
+
+
 def main():
-    log(f"Starting status server on port {STATUS_PORT}")
+    log(f"Starting web+status server on port {WEB_PORT}")
+    log(f"Starting health server on port {STATUS_PORT}")
     log(f"Home directory: {Path.home()}")
     log(f"User: {os.environ.get('USER', 'unknown')}")
     log(f"Claude dir check: {Path.home() / '.claude'} exists: {(Path.home() / '.claude').exists()}")
+
+    # Log static file serving configuration
+    log(f"Web directory: {WEB_DIR}")
+    log(f"URL prefix: '{URL_PREFIX}'")
+
+    # Log analytics configuration
+    log(f"Analytics enabled: {ANALYTICS_ENABLED}")
+    log(f"Analytics bucket: {ANALYTICS_BUCKET}")
+    log(f"Container name: {CONTAINER_NAME}")
+    log(f"Session ID: {current_session_id}")
+    log(f"Boto3 available: {HAS_BOTO3}")
 
     # List claude dir contents at startup
     claude_dir = Path.home() / '.claude'
@@ -679,9 +1170,27 @@ def main():
         if projects_dir.exists():
             log(f"Projects dir contents: {list(projects_dir.iterdir())[:10]}")
 
-    server = HTTPServer(('0.0.0.0', STATUS_PORT), StatusHandler)
-    print(f"Status server running on port {STATUS_PORT}")
-    log(f"Server started successfully on port {STATUS_PORT}")
+    # Start prompt capture background thread if analytics is enabled
+    if ANALYTICS_ENABLED and HAS_BOTO3:
+        log("Starting prompt capture background thread...")
+        capture_thread = threading.Thread(target=scan_and_capture_prompts, daemon=True)
+        capture_thread.start()
+        log("Prompt capture thread started")
+    else:
+        if not ANALYTICS_ENABLED:
+            log("Analytics is disabled (ANALYTICS_ENABLED != 'true')")
+        if not HAS_BOTO3:
+            log("boto3 not available - S3 uploads disabled")
+
+    # Start dedicated health server on STATUS_PORT (7683) for ECS health checks
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+
+    # Main web+status server on WEB_PORT (7680)
+    server = HTTPServer(('0.0.0.0', WEB_PORT), StatusHandler)
+    print(f"Web+status server running on port {WEB_PORT}")
+    print(f"Health server running on port {STATUS_PORT}")
+    log(f"Server started successfully on ports {WEB_PORT} and {STATUS_PORT}")
     server.serve_forever()
 
 if __name__ == '__main__':

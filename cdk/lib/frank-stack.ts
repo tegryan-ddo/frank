@@ -15,6 +15,9 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
 import * as path from 'path';
 import { Construct } from 'constructs';
 
@@ -91,6 +94,45 @@ export class FrankStack extends cdk.Stack {
       description: 'Claude OAuth credentials for Frank containers',
     });
 
+    // =========================================================================
+    // Analytics S3 Bucket
+    // =========================================================================
+    const analyticsBucket = new s3.Bucket(this, 'AnalyticsBucket', {
+      bucketName: `frank-analytics-${this.account}`,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      lifecycleRules: [
+        {
+          id: 'archive-old-prompts',
+          prefix: 'prompts/',
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(90),
+            },
+          ],
+          expiration: cdk.Duration.days(365),
+        },
+        {
+          id: 'archive-old-feedback',
+          prefix: 'feedback/',
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(90),
+            },
+          ],
+          expiration: cdk.Duration.days(365),
+        },
+        {
+          id: 'expire-aggregates',
+          prefix: 'aggregates/',
+          expiration: cdk.Duration.days(730), // 2 years for aggregates
+        },
+      ],
+    });
+
     // Task Definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FrankTask', {
       memoryLimitMiB: 4096,
@@ -118,6 +160,9 @@ export class FrankStack extends cdk.Stack {
     fileSystem.grantRootAccess(taskDefinition.taskRole);
     fileSystem.connections.allowDefaultPortFrom(ec2.Peer.ipv4(vpc.vpcCidrBlock));
 
+    // Grant S3 analytics bucket write access to task role
+    analyticsBucket.grantWrite(taskDefinition.taskRole);
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
@@ -141,6 +186,8 @@ export class FrankStack extends cdk.Stack {
         BASH_PORT: '7682',
         STATUS_PORT: '7683',
         AWS_REGION: this.region,
+        ANALYTICS_BUCKET: analyticsBucket.bucketName,
+        ANALYTICS_ENABLED: 'true',
         // Clone this repo on container startup
         GIT_REPO: 'https://github.com/tegryan-ddo/enkai.git',
         GIT_BRANCH: 'main',
@@ -400,9 +447,10 @@ export class FrankStack extends cdk.Stack {
       action: bashAuthAction,
     });
 
-    // Main app - with Cognito auth if configured
+    // Main app catch-all - with Cognito auth if configured
+    // Priority 49000 so profile rules (100-999) are evaluated first
     httpsListener.addAction('MainRule', {
-      priority: 20,
+      priority: 49000,
       conditions: [elbv2.ListenerCondition.pathPatterns(['/*'])],
       action: authAction,
     });
@@ -414,16 +462,10 @@ export class FrankStack extends cdk.Stack {
     });
 
     // Main domain: frank.digitaldevops.io
+    // (No wildcard needed - using path-based routing instead of subdomains)
     new route53.ARecord(this, 'FrankDns', {
       zone: hostedZone,
       recordName: 'frank',
-      target: route53.RecordTarget.fromAlias(new route53Targets.LoadBalancerTarget(alb)),
-    });
-
-    // Wildcard domain: *.frank.digitaldevops.io (for profile subdomains)
-    new route53.ARecord(this, 'FrankWildcardDns', {
-      zone: hostedZone,
-      recordName: '*.frank',
       target: route53.RecordTarget.fromAlias(new route53Targets.LoadBalancerTarget(alb)),
     });
 
@@ -444,11 +486,11 @@ export class FrankStack extends cdk.Stack {
       entry: path.join(__dirname, '../lambda/api/index.ts'),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_18_X,
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(90), // Needs time to wait for task IP registration
       memorySize: 256,
       environment: {
         ECS_CLUSTER: 'frank',
-        ECS_SERVICE: 'FrankStack-FrankService',
+        ECS_SERVICE: 'frank',
         DOMAIN: props.domainName,
         PROFILES_PARAM: profilesParam.parameterName,
         ALB_NAME: 'frank-alb',
@@ -472,6 +514,7 @@ export class FrankStack extends cdk.Stack {
         'ecs:RunTask',
         'ecs:StopTask',
         'ecs:DescribeServices',
+        'ecs:TagResource',
       ],
       resources: ['*'],
     }));
@@ -545,6 +588,81 @@ export class FrankStack extends cdk.Stack {
       action: launchAuthAction,
     });
 
+    // =========================================================================
+    // Analytics Dashboard Lambda
+    // =========================================================================
+    const dashboardFunction = new lambdaNodejs.NodejsFunction(this, 'DashboardFunction', {
+      entry: path.join(__dirname, '../lambda/dashboard/index.ts'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      environment: {
+        ANALYTICS_BUCKET: analyticsBucket.bucketName,
+        PROFILES_PARAM: profilesParam.parameterName,
+      },
+      bundling: {
+        externalModules: ['@aws-sdk/*'],
+        minify: true,
+        sourceMap: true,
+      },
+    });
+
+    // Grant dashboard read access to analytics bucket and profiles
+    analyticsBucket.grantRead(dashboardFunction);
+    profilesParam.grantRead(dashboardFunction);
+
+    // Dashboard target group
+    const dashboardTargetGroup = new elbv2.ApplicationTargetGroup(this, 'DashboardTarget', {
+      targetType: elbv2.TargetType.LAMBDA,
+      targets: [new elbv2Targets.LambdaTarget(dashboardFunction)],
+    });
+
+    // Dashboard route - with Cognito auth
+    const dashboardAuthAction = userPool && userPoolClient
+      ? new elbv2Actions.AuthenticateCognitoAction({
+          userPool,
+          userPoolClient,
+          userPoolDomain: cognito.UserPoolDomain.fromDomainName(this, 'EnkaiDomainDashboard', `${cognitoDomain}.auth.${this.region}.amazoncognito.com`),
+          next: elbv2.ListenerAction.forward([dashboardTargetGroup]),
+        })
+      : elbv2.ListenerAction.forward([dashboardTargetGroup]);
+
+    httpsListener.addAction('DashboardRule', {
+      priority: 7,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/dashboard', '/dashboard/*'])],
+      action: dashboardAuthAction,
+    });
+
+    // =========================================================================
+    // Analytics Pipeline Lambda (Daily Aggregation)
+    // =========================================================================
+    const analyticsFunction = new lambdaNodejs.NodejsFunction(this, 'AnalyticsFunction', {
+      entry: path.join(__dirname, '../lambda/analytics/index.ts'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 1024,
+      environment: {
+        ANALYTICS_BUCKET: analyticsBucket.bucketName,
+      },
+      bundling: {
+        externalModules: ['@aws-sdk/*'],
+        minify: true,
+        sourceMap: true,
+      },
+    });
+
+    // Grant analytics function read/write access to bucket
+    analyticsBucket.grantReadWrite(analyticsFunction);
+
+    // Schedule analytics to run daily at 2 AM UTC
+    new events.Rule(this, 'AnalyticsSchedule', {
+      schedule: events.Schedule.cron({ hour: '2', minute: '0' }),
+      targets: [new eventsTargets.LambdaFunction(analyticsFunction)],
+      description: 'Daily analytics aggregation for Frank prompts',
+    });
+
     // Outputs
     new cdk.CfnOutput(this, 'ServiceUrl', {
       value: `https://${props.domainName}`,
@@ -569,6 +687,16 @@ export class FrankStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'EfsFileSystemId', {
       value: fileSystem.fileSystemId,
       description: 'EFS file system ID for workspace storage',
+    });
+
+    new cdk.CfnOutput(this, 'AnalyticsBucketName', {
+      value: analyticsBucket.bucketName,
+      description: 'S3 bucket for prompt analytics',
+    });
+
+    new cdk.CfnOutput(this, 'DashboardUrl', {
+      value: `https://${props.domainName}/dashboard`,
+      description: 'Analytics dashboard URL',
     });
   }
 }

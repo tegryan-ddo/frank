@@ -29,8 +29,14 @@ const (
 	HealthCheckInterval = 30
 	HealthCheckTimeout  = 10
 
-	// Target port for Claude ttyd
-	ClaudePort = 7681
+	// Port definitions
+	WebPort    = 7680 // Web server (HTML wrapper)
+	ClaudePort = 7681 // Claude ttyd terminal
+	BashPort   = 7682 // Bash ttyd terminal
+	StatusPort = 7683 // Status server
+
+	// TargetPort is the port for ALB target groups (use web port for HTML wrapper)
+	TargetPort = WebPort
 )
 
 // Infrastructure holds discovered AWS infrastructure details
@@ -164,7 +170,7 @@ func (m *Manager) EnsureTargetGroup(ctx context.Context, profileName string) (st
 	createOutput, err := m.elbClient.CreateTargetGroup(ctx, &elasticloadbalancingv2.CreateTargetGroupInput{
 		Name:       aws.String(tgName),
 		Protocol:   elbv2types.ProtocolEnumHttp,
-		Port:       aws.Int32(ClaudePort),
+		Port:       aws.Int32(TargetPort),
 		VpcId:      aws.String(infra.VPCID),
 		TargetType: elbv2types.TargetTypeEnumIp,
 		HealthCheckEnabled:         aws.Bool(true),
@@ -197,6 +203,7 @@ func (m *Manager) EnsureTargetGroup(ctx context.Context, profileName string) (st
 }
 
 // EnsureListenerRule creates a listener rule for the profile if it doesn't exist
+// Uses path-based routing: /<profile>/* -> target group
 func (m *Manager) EnsureListenerRule(ctx context.Context, profileName, targetGroupArn string) error {
 	infra, err := m.DiscoverInfrastructure(ctx)
 	if err != nil {
@@ -211,13 +218,13 @@ func (m *Manager) EnsureListenerRule(ctx context.Context, profileName, targetGro
 		return fmt.Errorf("failed to describe listener rules: %w", err)
 	}
 
-	hostHeader := fmt.Sprintf("%s.frank.digitaldevops.io", profileName)
+	pathPattern := fmt.Sprintf("/%s/*", profileName)
 
 	for _, rule := range rules.Rules {
 		for _, cond := range rule.Conditions {
-			if cond.HostHeaderConfig != nil {
-				for _, val := range cond.HostHeaderConfig.Values {
-					if val == hostHeader {
+			if cond.PathPatternConfig != nil {
+				for _, val := range cond.PathPatternConfig.Values {
+					if val == pathPattern {
 						// Rule already exists
 						return nil
 					}
@@ -229,15 +236,15 @@ func (m *Manager) EnsureListenerRule(ctx context.Context, profileName, targetGro
 	// Calculate priority based on profile name hash (100-999 range)
 	priority := hashToPriority(profileName)
 
-	// Create listener rule
+	// Create listener rule with path-based routing
 	_, err = m.elbClient.CreateRule(ctx, &elasticloadbalancingv2.CreateRuleInput{
 		ListenerArn: aws.String(infra.ListenerArn),
 		Priority:    aws.Int32(priority),
 		Conditions: []elbv2types.RuleCondition{
 			{
-				Field: aws.String("host-header"),
-				HostHeaderConfig: &elbv2types.HostHeaderConditionConfig{
-					Values: []string{hostHeader},
+				Field: aws.String("path-pattern"),
+				PathPatternConfig: &elbv2types.PathPatternConditionConfig{
+					Values: []string{pathPattern},
 				},
 			},
 		},
@@ -265,9 +272,9 @@ func (m *Manager) EnsureListenerRule(ctx context.Context, profileName, targetGro
 					Priority:    aws.Int32(priority),
 					Conditions: []elbv2types.RuleCondition{
 						{
-							Field: aws.String("host-header"),
-							HostHeaderConfig: &elbv2types.HostHeaderConditionConfig{
-								Values: []string{hostHeader},
+							Field: aws.String("path-pattern"),
+							PathPatternConfig: &elbv2types.PathPatternConditionConfig{
+								Values: []string{pathPattern},
 							},
 						},
 					},
@@ -368,7 +375,7 @@ func (m *Manager) DeleteListenerRule(ctx context.Context, profileName string) er
 		return err
 	}
 
-	// Find the rule by host header condition
+	// Find the rule by path pattern condition
 	rules, err := m.elbClient.DescribeRules(ctx, &elasticloadbalancingv2.DescribeRulesInput{
 		ListenerArn: aws.String(infra.ListenerArn),
 	})
@@ -376,13 +383,13 @@ func (m *Manager) DeleteListenerRule(ctx context.Context, profileName string) er
 		return fmt.Errorf("failed to describe listener rules: %w", err)
 	}
 
-	hostHeader := fmt.Sprintf("%s.frank.digitaldevops.io", profileName)
+	pathPattern := fmt.Sprintf("/%s/*", profileName)
 
 	for _, rule := range rules.Rules {
 		for _, cond := range rule.Conditions {
-			if cond.HostHeaderConfig != nil {
-				for _, val := range cond.HostHeaderConfig.Values {
-					if val == hostHeader {
+			if cond.PathPatternConfig != nil {
+				for _, val := range cond.PathPatternConfig.Values {
+					if val == pathPattern {
 						// Delete this rule
 						_, err = m.elbClient.DeleteRule(ctx, &elasticloadbalancingv2.DeleteRuleInput{
 							RuleArn: rule.RuleArn,

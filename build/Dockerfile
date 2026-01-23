@@ -90,14 +90,10 @@ RUN mkdir -p /root/.config/claude-code \
     && mkdir -p /root/.claude \
     && mkdir -p /workspace
 
-# Install MCP Launchpad
-RUN uv tool install mcp-launchpad || \
-    uv tool install https://github.com/kenneth-liao/mcp-launchpad.git
-
 # Copy MCP configuration
 COPY mcp.json /root/.claude/mcp.json
 
-# Copy CLAUDE.md for MCP Launchpad integration instructions
+# Copy CLAUDE.md
 COPY CLAUDE.md /root/.claude/CLAUDE.md
 
 # Copy combined view HTML template

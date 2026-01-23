@@ -220,51 +220,20 @@ Notifications have a 30-second cooldown to prevent spam.
 
 ## MCP Servers
 
-The container includes [MCP Launchpad](https://github.com/kenneth-liao/mcp-launchpad) for dynamic tool discovery and execution.
-
-### Pre-configured Servers
+The container includes pre-configured MCP servers for enhanced Claude capabilities:
 
 | Server | Description |
 |--------|-------------|
 | `context7` | Context management and retrieval |
 | `sequential-thinking` | Step-by-step reasoning and planning |
 | `aws-documentation` | AWS documentation search |
-| `aws-knowledge` | AWS knowledge base (Amazon Q) |
 | `aws-core` | Core AWS service operations |
-
-### Using MCP Launchpad
-
-Inside the container, use `mcpl` to discover and execute tools:
-
-```bash
-# Search for tools across all servers
-mcpl search "s3 bucket"
-
-# List all available tools
-mcpl list
-
-# Inspect a specific tool
-mcpl inspect aws-core list_buckets --example
-
-# Call a tool
-mcpl call aws-core list_buckets '{}'
-
-# Check server connections
-mcpl verify
-```
-
-### Key Workflow
-
-1. **Search first**: `mcpl search "your query"` - Never guess tool names
-2. **Inspect**: `mcpl inspect <server> <tool> --example` - Get parameters
-3. **Execute**: `mcpl call <server> <tool> '{"args": "here"}'`
 
 ## Container Contents
 
 The base image includes:
 
 - Claude Code CLI
-- MCP Launchpad (`mcpl`)
 - ttyd (web terminal)
 - git, gh, curl, jq
 - AWS CLI v2

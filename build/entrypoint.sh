@@ -15,7 +15,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-$(hostname)}"
 WORKTREE_PATH=""
 REPO_BASE="/workspace/.repo"
 
-# Ensure uv tools are in PATH (for MCP Launchpad)
+# Ensure uv tools are in PATH
 export PATH="$HOME/.local/bin:$PATH"
 
 # Cleanup function - removes worktree on container shutdown
@@ -199,13 +199,6 @@ fi
 # Change to working directory
 cd "$WORK_DIR"
 echo "Current directory: $(pwd)"
-
-# Verify MCP Launchpad is available
-if command -v mcpl &> /dev/null; then
-    echo "MCP Launchpad available - use 'mcpl search' to discover tools"
-    # Pre-verify MCP servers (non-blocking)
-    mcpl verify &> /dev/null &
-fi
 
 # Common ttyd theme settings
 TTYD_THEME='{"background":"#1e1e1e","foreground":"#d4d4d4","cursor":"#d4d4d4","selectionBackground":"#264f78","black":"#1e1e1e","red":"#f44747","green":"#6a9955","yellow":"#dcdcaa","blue":"#569cd6","magenta":"#c586c0","cyan":"#4ec9b0","white":"#d4d4d4","brightBlack":"#808080","brightRed":"#f44747","brightGreen":"#6a9955","brightYellow":"#dcdcaa","brightBlue":"#569cd6","brightMagenta":"#c586c0","brightCyan":"#4ec9b0","brightWhite":"#ffffff"}'

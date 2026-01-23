@@ -1,103 +1,72 @@
-# MCP Launchpad Integration
+# Frank ECS Container Environment
 
-This container includes MCP Launchpad (`mcpl`) for dynamic tool discovery and execution across multiple MCP servers.
+This container runs Claude Code in an ECS Fargate environment with persistent storage and pre-configured tools.
 
-## Available MCP Servers
+## Environment Overview
 
-The following servers are pre-configured:
+- **Workspace**: `/workspace` - Your working directory, backed by EFS for persistence
+- **Git Worktrees**: Automatically created for container isolation when `GIT_REPO` is set
+- **Credentials**: Claude OAuth and GitHub tokens are injected from AWS Secrets Manager
+
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `claude` | Claude Code CLI |
+| `git` | Version control |
+| `gh` | GitHub CLI (pre-authenticated) |
+| `aws` | AWS CLI v2 |
+| `node` / `npm` | Node.js 20 LTS |
+| `uv` / `uvx` | Fast Python package manager |
+| `python3` | Python 3 runtime |
+
+## MCP Servers
+
+The following MCP servers are available for extended functionality:
 
 | Server | Description |
 |--------|-------------|
-| `context7` | Context management and retrieval |
 | `sequential-thinking` | Step-by-step reasoning and planning |
 | `aws-documentation` | AWS documentation search |
-| `aws-knowledge` | AWS knowledge base (Amazon Q) |
-| `aws-core` | Core AWS service operations |
+| `aws-core` | Core AWS service operations (S3, EC2, etc.) |
+| `next-devtools` | Next.js development tools and debugging |
+| `playwright` | Browser automation and testing |
 
-## How to Use MCP Tools
+## Working with Git
 
-### 1. Discover Tools First
+The container automatically creates git worktrees for isolation:
+- Base repo is cloned to `/workspace/.repo` (or uses existing `/workspace` if a repo exists)
+- Each container gets its own worktree at `/workspace/worktrees/<container-name>`
+- Changes in worktrees can be committed and pushed independently
+- Worktrees persist across container restarts (same container name)
 
-**Never guess tool names.** Always search for relevant tools:
+## AWS Access
 
-```bash
-# Search across all servers
-mcpl search "your query here"
-
-# Examples:
-mcpl search "s3 bucket"
-mcpl search "create file"
-mcpl search "sequential thinking"
-```
-
-### 2. List Available Tools
+AWS credentials are automatically provided via the ECS task IAM role. No manual configuration needed.
 
 ```bash
-# List all servers
-mcpl list
+# Example: List S3 buckets
+aws s3 ls
 
-# List tools in a specific server
-mcpl list aws-core
-mcpl list context7
+# Example: Describe running ECS tasks
+aws ecs list-tasks --cluster frank
 ```
 
-### 3. Inspect Tool Details
+## GitHub Access
+
+GitHub is pre-authenticated via the injected token:
 
 ```bash
-# Get tool schema and example
-mcpl inspect <server> <tool> --example
+# Clone repositories
+gh repo clone owner/repo
 
-# Example:
-mcpl inspect aws-core list_buckets --example
+# Create PRs
+gh pr create --title "My PR" --body "Description"
 ```
 
-### 4. Execute Tools
+## Tips
 
-```bash
-# Call a tool with JSON arguments
-mcpl call <server> <tool> '{"param": "value"}'
-
-# Examples:
-mcpl call sequential-thinking think '{"task": "Plan a web application"}'
-mcpl call aws-core list_buckets '{}'
-```
-
-## Session Management
-
-MCP Launchpad uses a daemon for persistent connections:
-
-```bash
-# Check session status
-mcpl session status
-
-# Stop the daemon (connections will restart on next use)
-mcpl session stop
-
-# Verify all server connections
-mcpl verify
-```
-
-## Troubleshooting
-
-### Tool Not Found
-```bash
-mcpl search "what you're looking for"
-```
-
-### Connection Issues
-```bash
-mcpl verify
-mcpl session stop
-```
-
-### View Tool Schema
-```bash
-mcpl inspect <server> <tool>
-```
-
-## Best Practices
-
-1. **Search before calling** - Use `mcpl search` to find the right tool
-2. **Check parameters** - Use `mcpl inspect --example` to see required arguments
-3. **Use JSON format** - Tool arguments must be valid JSON
-4. **Verify connections** - Run `mcpl verify` if tools aren't responding
+1. **Persistent storage**: Files in `/workspace` persist via EFS
+2. **Container restarts**: Same container name = same worktree
+3. **Multiple containers**: Each gets an isolated worktree
+4. **.claude directory**: Symlinked from base repo for shared hooks/settings

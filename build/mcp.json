@@ -1,10 +1,5 @@
 {
   "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@context7/mcp-server"],
-      "env": {}
-    },
     "sequential-thinking": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
@@ -12,21 +7,27 @@
     },
     "aws-documentation": {
       "command": "uvx",
-      "args": ["mcp-server-aws-documentation"],
-      "env": {}
-    },
-    "aws-knowledge": {
-      "command": "uvx",
-      "args": ["awslabs.amazon-q-developer-mcp-server"],
-      "env": {}
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "us-east-1"
+      }
     },
     "aws-core": {
       "command": "uvx",
-      "args": ["mcp-server-aws"],
+      "args": ["awslabs.aws-api-mcp-server@latest"],
       "env": {
-        "AWS_PROFILE": "${AWS_PROFILE}",
-        "AWS_REGION": "${AWS_REGION}"
+        "AWS_REGION": "us-east-1"
       }
+    },
+    "next-devtools": {
+      "command": "npx",
+      "args": ["-y", "next-devtools-mcp"],
+      "env": {}
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-server-playwright"],
+      "env": {}
     }
   }
 }
