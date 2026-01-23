@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     less \
     vim \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 LTS
@@ -79,8 +80,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/ \
     && mv /root/.local/bin/uvx /usr/local/bin/ 2>/dev/null || true
 
-# Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code CLI (native installer)
+RUN curl -fsSL https://claude.ai/install.sh | sh \
+    && mv /root/.claude/local/bin/claude /usr/local/bin/claude
 
 # Create directories (running as root for volume mount compatibility)
 RUN mkdir -p /root/.config/claude-code \
@@ -88,23 +90,26 @@ RUN mkdir -p /root/.config/claude-code \
     && mkdir -p /root/.claude \
     && mkdir -p /workspace
 
-# Install MCP Launchpad
-RUN uv tool install mcp-launchpad || \
-    uv tool install https://github.com/kenneth-liao/mcp-launchpad.git
-
 # Bake MCP configuration into image
-COPY mcp.json /root/.claude/mcp.json
+# Claude Code reads from ~/.claude.json for MCP servers
+COPY build/mcp.json /root/.claude.json
+COPY build/mcp.json /root/.claude/mcp.json
 
-# Copy CLAUDE.md
-COPY CLAUDE.md /root/.claude/CLAUDE.md
+# Copy CLAUDE.md for environment documentation
+COPY build/CLAUDE.md /root/.claude/CLAUDE.md
+
+# Copy settings to use Opus 4.5 by default
+# settings.json is the global config, settings.local.json is for project-level
+COPY build/settings.local.json /root/.claude/settings.json
+COPY build/settings.local.json /root/.claude/settings.local.json
 
 # Copy web assets
-COPY index.html /usr/local/share/frank/index.html
-COPY status-server.py /usr/local/bin/status-server.py
+COPY build/index.html /usr/local/share/frank/index.html
+COPY build/status-server.py /usr/local/bin/status-server.py
 RUN chmod +x /usr/local/bin/status-server.py
 
 # Copy ECS-specific entrypoint
-COPY entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
+COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Environment
