@@ -1,0 +1,38 @@
+# CDK output directories
+cdk/cdk.out
+cdk/cdk.out.*
+cdk.out
+cdk.out.*
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+*.out
+coverage.html
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (CDK has its own)
+node_modules
+
+# Temporary files
+*.tmp
+*.temp
+nul
