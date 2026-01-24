@@ -135,8 +135,8 @@ export class FrankStack extends cdk.Stack {
 
     // Task Definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FrankTask', {
-      memoryLimitMiB: 4096,
-      cpu: 2048,
+      memoryLimitMiB: 8192,
+      cpu: 4096,
       runtimePlatform: {
         cpuArchitecture: ecs.CpuArchitecture.X86_64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
@@ -494,6 +494,10 @@ export class FrankStack extends cdk.Stack {
         DOMAIN: props.domainName,
         PROFILES_PARAM: profilesParam.parameterName,
         ALB_NAME: 'frank-alb',
+        // Cognito config for profile route authentication
+        COGNITO_USER_POOL_ARN: userPool ? `arn:aws:cognito-idp:${this.region}:${this.account}:userpool/${props.cognitoUserPoolId}` : '',
+        COGNITO_CLIENT_ID: props.cognitoClientId || '',
+        COGNITO_DOMAIN: `${cognitoDomain}.auth.${this.region}.amazoncognito.com`,
       },
       bundling: {
         externalModules: ['@aws-sdk/*'], // Use Lambda runtime SDK
@@ -542,6 +546,14 @@ export class FrankStack extends cdk.Stack {
         'elasticloadbalancing:RegisterTargets',
         'elasticloadbalancing:DeregisterTargets',
         'elasticloadbalancing:AddTags',
+      ],
+      resources: ['*'],
+    }));
+
+    // Cognito permissions for creating auth rules
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'cognito-idp:DescribeUserPoolClient',
       ],
       resources: ['*'],
     }));

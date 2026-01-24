@@ -108,6 +108,91 @@ git config --global --add safe.directory /workspace
 git config --global --add safe.directory '*'
 
 # -----------------------------------------------------------------------------
+# Claude Code Plugins Setup
+# Clones official plugins repo and installs selected plugins to ~/.claude/
+# -----------------------------------------------------------------------------
+PLUGINS_REPO="https://github.com/anthropics/claude-plugins-official.git"
+PLUGINS_CACHE="/opt/claude-plugins-official"
+PLUGINS_DIR="$HOME/.claude/plugins"
+
+# List of plugins to install (internal plugins from plugins/ directory)
+INTERNAL_PLUGINS=(
+    "frontend-design"
+    "code-review"
+    "feature-dev"
+    "security-guidance"
+    "code-simplifier"
+    "ralph-loop"
+    "typescript-lsp"
+    "pyright-lsp"
+    "gopls-lsp"
+    "claude-code-setup"
+    "claude-md-management"
+    "hookify"
+)
+
+# List of external plugins (from external_plugins/ directory)
+EXTERNAL_PLUGINS=(
+    "context7"
+    "serena"
+    "playwright"
+    "greptile"
+)
+
+install_plugins() {
+    echo "=== Installing Claude Code Plugins ==="
+
+    # Clone or update plugins repo
+    if [ -d "$PLUGINS_CACHE/.git" ]; then
+        echo "Updating plugins repository..."
+        git -C "$PLUGINS_CACHE" pull --quiet 2>/dev/null || true
+    else
+        echo "Cloning plugins repository..."
+        git clone --depth 1 "$PLUGINS_REPO" "$PLUGINS_CACHE" 2>/dev/null || {
+            echo "WARNING: Failed to clone plugins repo"
+            return 1
+        }
+    fi
+
+    # Create plugins directory
+    mkdir -p "$PLUGINS_DIR"
+
+    # Install internal plugins
+    for plugin in "${INTERNAL_PLUGINS[@]}"; do
+        local src="$PLUGINS_CACHE/plugins/$plugin"
+        local dest="$PLUGINS_DIR/$plugin"
+        if [ -d "$src" ]; then
+            if [ ! -e "$dest" ]; then
+                echo "  Installing plugin: $plugin"
+                ln -s "$src" "$dest"
+            fi
+        else
+            echo "  WARNING: Plugin not found: $plugin"
+        fi
+    done
+
+    # Install external plugins
+    for plugin in "${EXTERNAL_PLUGINS[@]}"; do
+        local src="$PLUGINS_CACHE/external_plugins/$plugin"
+        local dest="$PLUGINS_DIR/$plugin"
+        if [ -d "$src" ]; then
+            if [ ! -e "$dest" ]; then
+                echo "  Installing external plugin: $plugin"
+                ln -s "$src" "$dest"
+            fi
+        else
+            echo "  WARNING: External plugin not found: $plugin"
+        fi
+    done
+
+    echo "Plugins installed to $PLUGINS_DIR"
+    ls -la "$PLUGINS_DIR" 2>/dev/null || true
+}
+
+# Install plugins (must complete before Claude starts to avoid race condition)
+install_plugins
+
+# -----------------------------------------------------------------------------
 # Worktree Setup
 # Creates worktrees for container isolation - works with both:
 # 1. GIT_REPO env var (clone repo and create worktree)
@@ -115,28 +200,26 @@ git config --global --add safe.directory '*'
 # Worktrees persist on EFS, containers with same name reuse them
 # -----------------------------------------------------------------------------
 
-# Link .claude directory from base repo to worktree for hooks/settings
-link_claude_directory() {
+# Copy .claude directory from base repo to worktree for hooks/settings
+# Note: We copy instead of symlink because hooks use $CLAUDE_PROJECT_DIR paths
+# which don't resolve correctly through symlinks
+copy_claude_directory() {
     local worktree_path="$1"
     local base_repo="$2"
 
     # Check if base repo has .claude directory
     if [ -d "$base_repo/.claude" ]; then
-        # Remove existing .claude in worktree if it exists (but isn't a symlink)
-        if [ -d "$worktree_path/.claude" ] && [ ! -L "$worktree_path/.claude" ]; then
-            echo "Removing existing .claude directory in worktree"
+        # Remove existing .claude in worktree (symlink or directory)
+        if [ -e "$worktree_path/.claude" ] || [ -L "$worktree_path/.claude" ]; then
+            echo "Removing existing .claude in worktree"
             rm -rf "$worktree_path/.claude"
         fi
 
-        # Create symlink if it doesn't exist
-        if [ ! -e "$worktree_path/.claude" ]; then
-            echo "Linking .claude directory: $worktree_path/.claude -> $base_repo/.claude"
-            ln -s "$base_repo/.claude" "$worktree_path/.claude"
-        else
-            echo ".claude symlink already exists"
-        fi
+        # Copy the .claude directory
+        echo "Copying .claude directory to worktree: $base_repo/.claude -> $worktree_path/.claude"
+        cp -r "$base_repo/.claude" "$worktree_path/.claude"
     else
-        echo "No .claude directory in base repo - skipping symlink"
+        echo "No .claude directory in base repo - skipping copy"
     fi
 }
 setup_worktree_from_clone() {
@@ -190,7 +273,7 @@ setup_worktree_from_clone() {
     fi
 
     # Link .claude directory for hooks and settings
-    link_claude_directory "$WORKTREE_PATH" "$REPO_BASE"
+    copy_claude_directory "$WORKTREE_PATH" "$REPO_BASE"
 
     echo "Working directory: $WORKTREE_PATH"
     cd "$WORKTREE_PATH"
@@ -233,7 +316,7 @@ setup_worktree_from_local() {
     fi
 
     # Link .claude directory for hooks and settings
-    link_claude_directory "$WORKTREE_PATH" "/workspace"
+    copy_claude_directory "$WORKTREE_PATH" "/workspace"
 
     echo "Working directory: $WORKTREE_PATH"
     cd "$WORKTREE_PATH"

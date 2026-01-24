@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -67,6 +68,7 @@ func init() {
 	ecsCmd.AddCommand(ecsScaleCmd)
 	ecsCmd.AddCommand(ecsLogsCmd)
 	ecsCmd.AddCommand(ecsStatusCmd)
+	ecsCmd.AddCommand(ecsExecCmd)
 
 	// Logs command flags
 	ecsLogsCmd.Flags().BoolVarP(&ecsLogsFollow, "follow", "f", false, "Follow log output")
@@ -799,6 +801,94 @@ func runECSStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
+	return nil
+}
+
+// ============================================================================
+// ecs exec - Connect to a task via SSM
+// ============================================================================
+
+var ecsExecCmd = &cobra.Command{
+	Use:   "exec <profile-or-task-id>",
+	Short: "Connect to a Frank task via SSM Session Manager",
+	Long: `Connect to a running Frank task using ECS Exec (SSM Session Manager).
+
+Requires the AWS CLI and Session Manager plugin to be installed.
+If the argument matches a profile name with a running task, connects to that task.
+Otherwise, treats the argument as a task ID.
+
+Examples:
+  frank ecs exec enkai              # Connect to profile's task
+  frank ecs exec abc123def456       # Connect to task by ID`,
+	Args: cobra.ExactArgs(1),
+	RunE: runECSExec,
+}
+
+func runECSExec(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	arg := args[0]
+
+	// Check if arg is a profile name with a running task
+	taskID, _ := findTaskByProfile(ctx, arg)
+	if taskID == "" {
+		// Treat as task ID
+		taskID = arg
+	}
+
+	// Verify task exists and has execute command enabled
+	client, err := getECSClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	descResult, err := client.DescribeTasks(ctx, &ecs.DescribeTasksInput{
+		Cluster: aws.String(ecsCluster),
+		Tasks:   []string{taskID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to describe task: %w", err)
+	}
+
+	if len(descResult.Tasks) == 0 {
+		return fmt.Errorf("task %s not found", taskID)
+	}
+
+	task := descResult.Tasks[0]
+	if !task.EnableExecuteCommand {
+		return fmt.Errorf("task %s does not have execute command enabled. Start a new task with 'frank ecs start'", taskID)
+	}
+
+	if aws.ToString(task.LastStatus) != "RUNNING" {
+		return fmt.Errorf("task %s is not running (status: %s)", taskID, aws.ToString(task.LastStatus))
+	}
+
+	// Build the AWS CLI command
+	awsArgs := []string{
+		"ecs", "execute-command",
+		"--cluster", ecsCluster,
+		"--task", taskID,
+		"--container", "frank",
+		"--interactive",
+		"--command", "/bin/bash",
+	}
+
+	if ecsRegion != "" {
+		awsArgs = append([]string{"--region", ecsRegion}, awsArgs...)
+	}
+
+	fmt.Printf("Connecting to task %s...\n", color.CyanString(taskID))
+	fmt.Printf("Running: aws %s\n\n", strings.Join(awsArgs, " "))
+
+	// Execute AWS CLI - this replaces the current process
+	awsCmd := exec.Command("aws", awsArgs...)
+	awsCmd.Stdin = os.Stdin
+	awsCmd.Stdout = os.Stdout
+	awsCmd.Stderr = os.Stderr
+
+	if err := awsCmd.Run(); err != nil {
+		return fmt.Errorf("failed to execute command: %w\n\nMake sure you have:\n1. AWS CLI installed\n2. Session Manager plugin installed (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)", err)
+	}
+
 	return nil
 }
 

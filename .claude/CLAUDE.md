@@ -105,6 +105,52 @@ frank ecs logs <task-id>
 frank ecs status
 ```
 
+## MCP Servers
+
+Worker nodes come pre-configured with the following MCP servers:
+
+| Server | Package | Description |
+|--------|---------|-------------|
+| sequential-thinking | `@modelcontextprotocol/server-sequential-thinking` | Dynamic problem-solving through thought sequences |
+| aws-documentation | `awslabs.aws-documentation-mcp-server` | AWS documentation lookup |
+| aws-core | `awslabs.aws-api-mcp-server` | AWS API access |
+| next-devtools | `next-devtools-mcp` | Next.js development tools |
+| playwright | `@playwright/mcp` | Browser automation and testing |
+| context7 | `@upstash/context7-mcp` | Up-to-date library documentation |
+| serena | `serena` | Semantic code analysis |
+
+## Claude Code Plugins
+
+Plugins are automatically installed from [claude-plugins-official](https://github.com/anthropics/claude-plugins-official) at container startup.
+
+### Internal Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| frontend-design | Distinctive, production-grade UI/UX design |
+| code-review | Code review assistance |
+| feature-dev | Feature development workflow |
+| security-guidance | Security best practices and hooks |
+| code-simplifier | Code simplification agents |
+| ralph-loop | Iterative development loops |
+| typescript-lsp | TypeScript language server integration |
+| pyright-lsp | Python language server integration |
+| gopls-lsp | Go language server integration |
+| claude-code-setup | Claude Code setup assistance |
+| claude-md-management | CLAUDE.md file management |
+| hookify | Hook management utilities |
+
+### External Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| context7 | Up-to-date library documentation via MCP |
+| serena | Semantic code analysis |
+| playwright | Browser automation and E2E testing |
+| greptile | Code search and understanding |
+
+Plugins are installed to `~/.claude/plugins/` and symlinked from `/opt/claude-plugins-official`.
+
 ## Architecture
 
 - **ALB**: Routes traffic via path-based rules (`/profile/*`)

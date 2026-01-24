@@ -40,6 +40,11 @@ const DOMAIN = process.env.DOMAIN || 'frank.digitaldevops.io';
 const PROFILES_PARAM = process.env.PROFILES_PARAM || '/frank/profiles';
 const ALB_NAME = process.env.ALB_NAME || 'frank-alb';
 
+// Cognito config for profile route authentication
+const COGNITO_USER_POOL_ARN = process.env.COGNITO_USER_POOL_ARN || '';
+const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID || '';
+const COGNITO_DOMAIN = process.env.COGNITO_DOMAIN || '';
+
 interface Profile {
   name: string;
   repo: string;
@@ -387,7 +392,40 @@ async function ensureListenerRuleWithPriority(
     }
   }
 
-  // Create rule with path-based routing
+  // Build actions array - include Cognito auth if configured
+  const actions: any[] = [];
+
+  if (COGNITO_USER_POOL_ARN && COGNITO_CLIENT_ID && COGNITO_DOMAIN) {
+    // Add Cognito authentication action first (Order: 1)
+    actions.push({
+      Type: 'authenticate-cognito',
+      Order: 1,
+      AuthenticateCognitoConfig: {
+        UserPoolArn: COGNITO_USER_POOL_ARN,
+        UserPoolClientId: COGNITO_CLIENT_ID,
+        UserPoolDomain: COGNITO_DOMAIN,
+        SessionCookieName: 'AWSELBAuthSessionCookie',
+        Scope: 'openid',
+        SessionTimeout: 604800, // 7 days
+        OnUnauthenticatedRequest: 'authenticate',
+      },
+    });
+    // Forward action comes after auth (Order: 2)
+    actions.push({
+      Type: 'forward',
+      Order: 2,
+      TargetGroupArn: targetGroupArn,
+    });
+  } else {
+    // No Cognito config - just forward (no auth)
+    console.warn('Cognito not configured - creating rule without authentication');
+    actions.push({
+      Type: 'forward',
+      TargetGroupArn: targetGroupArn,
+    });
+  }
+
+  // Create rule with path-based routing and authentication
   try {
     await elbClient.send(
       new CreateRuleCommand({
@@ -399,12 +437,7 @@ async function ensureListenerRuleWithPriority(
             PathPatternConfig: { Values: pathPatterns },
           },
         ],
-        Actions: [
-          {
-            Type: 'forward',
-            TargetGroupArn: targetGroupArn,
-          },
-        ],
+        Actions: actions,
         Tags: [{ Key: 'frank-profile', Value: profileName }],
       })
     );
@@ -423,12 +456,7 @@ async function ensureListenerRuleWithPriority(
                   PathPatternConfig: { Values: pathPatterns },
                 },
               ],
-              Actions: [
-                {
-                  Type: 'forward',
-                  TargetGroupArn: targetGroupArn,
-                },
-              ],
+              Actions: actions,
               Tags: [{ Key: 'frank-profile', Value: profileName }],
             })
           );
