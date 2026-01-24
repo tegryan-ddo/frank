@@ -26,7 +26,17 @@
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-playwright"],
+      "args": ["@playwright/mcp@latest"],
+      "env": {}
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {}
+    },
+    "serena": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
       "env": {}
     }
   }

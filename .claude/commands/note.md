@@ -1,4 +1,4 @@
-# /todo - Capture Ideas for Future Work
+# /note - Capture Ideas for Future Work
 
 Capture an idea, ask clarifying questions if needed, perform light research, and save it as a structured markdown file in the `todo/` folder.
 

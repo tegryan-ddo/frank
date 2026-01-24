@@ -93,16 +93,16 @@ RUN mkdir -p /root/.config/claude-code \
 
 # Bake MCP configuration into image
 # Claude Code reads from ~/.claude.json for MCP servers
-COPY build/mcp.json /root/.claude.json
-COPY build/mcp.json /root/.claude/mcp.json
+COPY build/.claude/mcp.json /root/.claude.json
+COPY build/.claude/mcp.json /root/.claude/mcp.json
 
 # Copy CLAUDE.md for environment documentation
-COPY build/CLAUDE.md /root/.claude/CLAUDE.md
+COPY build/.claude/CLAUDE.md /root/.claude/CLAUDE.md
 
 # Copy settings to use Opus 4.5 by default
 # settings.json is the global config, settings.local.json is for project-level
-COPY build/settings.local.json /root/.claude/settings.json
-COPY build/settings.local.json /root/.claude/settings.local.json
+COPY build/.claude/settings.local.json /root/.claude/settings.json
+COPY build/.claude/settings.local.json /root/.claude/settings.local.json
 
 # Copy web assets
 COPY build/index.html /usr/local/share/frank/index.html
