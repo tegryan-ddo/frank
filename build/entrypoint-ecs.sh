@@ -218,6 +218,23 @@ copy_claude_directory() {
         # Copy the .claude directory
         echo "Copying .claude directory to worktree: $base_repo/.claude -> $worktree_path/.claude"
         cp -r "$base_repo/.claude" "$worktree_path/.claude"
+
+        # Force sync to ensure EFS has propagated the files
+        sync
+
+        # Verify the copy succeeded
+        if [ -d "$worktree_path/.claude" ]; then
+            echo "  .claude directory copied successfully"
+            if [ -d "$worktree_path/.claude/commands" ]; then
+                local cmd_count=$(ls -1 "$worktree_path/.claude/commands" 2>/dev/null | wc -l)
+                echo "  Found $cmd_count command(s) in .claude/commands/"
+                ls -la "$worktree_path/.claude/commands/" 2>/dev/null || true
+            else
+                echo "  WARNING: No .claude/commands directory found"
+            fi
+        else
+            echo "  ERROR: Failed to copy .claude directory!"
+        fi
     else
         echo "No .claude directory in base repo - skipping copy"
     fi
@@ -243,8 +260,9 @@ setup_worktree_from_clone() {
             echo "Cloning new repository to $REPO_BASE..."
             git clone "$repo_url" "$REPO_BASE"
         else
-            echo "Repository base exists, fetching updates..."
+            echo "Repository base exists, fetching and pulling updates..."
             git -C "$REPO_BASE" fetch --all 2>/dev/null || true
+            git -C "$REPO_BASE" pull --ff-only 2>/dev/null || true
         fi
     fi
 
@@ -425,6 +443,20 @@ BASH_PID=$!
 
 # Wait for bash terminal to be ready
 wait_for_port "$BASH_PORT" "Bash terminal" 10
+
+# Final verification before starting Claude
+echo "=== Pre-flight checks ==="
+echo "Working directory: $(pwd)"
+if [ -d ".claude" ]; then
+    echo "  .claude directory: OK"
+    if [ -d ".claude/commands" ]; then
+        echo "  .claude/commands: OK ($(ls -1 .claude/commands 2>/dev/null | wc -l) files)"
+    else
+        echo "  .claude/commands: MISSING"
+    fi
+else
+    echo "  .claude directory: MISSING"
+fi
 
 # Start Claude terminal (foreground) with base path for ALB routing
 echo "Starting Claude terminal on port $TTYD_PORT (path: $CLAUDE_BASE_PATH)..."
