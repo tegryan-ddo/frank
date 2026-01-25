@@ -239,6 +239,64 @@ copy_claude_directory() {
         echo "No .claude directory in base repo - skipping copy"
     fi
 }
+# Check if container name has worker ID suffix (e.g., enkai-1 -> profile=enkai, worker=1)
+# Returns: sets PROFILE_NAME and WORKER_ID variables, or empty if no worker suffix
+parse_container_name() {
+    PROFILE_NAME=""
+    WORKER_ID=""
+
+    # Check if CONTAINER_NAME matches pattern: name-number
+    if [[ "$CONTAINER_NAME" =~ ^(.+)-([0-9]+)$ ]]; then
+        PROFILE_NAME="${BASH_REMATCH[1]}"
+        WORKER_ID="${BASH_REMATCH[2]}"
+        echo "Container name parsed: profile=$PROFILE_NAME, worker=$WORKER_ID"
+    fi
+}
+
+# Try to use a pre-warmed worktree (created by prewarm.sh)
+# Returns 0 if successful, 1 if no pre-warmed worktree found
+setup_prewarmed_worktree() {
+    parse_container_name
+
+    if [ -z "$PROFILE_NAME" ] || [ -z "$WORKER_ID" ]; then
+        echo "No worker ID in container name - not using pre-warmed worktree"
+        return 1
+    fi
+
+    local prewarmed_base="/workspace/repos/$PROFILE_NAME/base"
+    local prewarmed_worktree="/workspace/repos/$PROFILE_NAME/worktrees/$WORKER_ID"
+
+    # Check if pre-warmed worktree exists
+    if [ ! -d "$prewarmed_worktree" ] || [ ! -f "$prewarmed_worktree/.git" ]; then
+        echo "No pre-warmed worktree found at $prewarmed_worktree"
+        return 1
+    fi
+
+    echo "=== Using pre-warmed worktree ==="
+    echo "Profile: $PROFILE_NAME"
+    echo "Worker: $WORKER_ID"
+    echo "Worktree: $prewarmed_worktree"
+
+    # Update the worktree
+    echo "Pulling latest changes..."
+    git -C "$prewarmed_worktree" pull --ff-only 2>/dev/null || true
+
+    # Copy fresh .claude directory
+    if [ -d "$prewarmed_base/.claude" ]; then
+        copy_claude_directory "$prewarmed_worktree" "$prewarmed_base"
+    fi
+
+    # Set environment
+    WORKTREE_PATH="$prewarmed_worktree"
+    REPO_BASE="$prewarmed_base"
+    export WORKTREE_PATH REPO_BASE
+
+    echo "Working directory: $WORKTREE_PATH"
+    cd "$WORKTREE_PATH"
+
+    return 0
+}
+
 setup_worktree_from_clone() {
     local repo_url="$1"
     local branch="${2:-main}"
@@ -341,7 +399,11 @@ setup_worktree_from_local() {
 }
 
 # Setup worktree based on configuration
-if [ -n "$GIT_REPO" ]; then
+# Priority: 1) Pre-warmed worktree, 2) Clone from URL, 3) Existing local repo
+if setup_prewarmed_worktree; then
+    # Successfully using pre-warmed worktree (fastest path)
+    WORK_DIR="$WORKTREE_PATH"
+elif [ -n "$GIT_REPO" ]; then
     # Clone from URL and create worktree
     setup_worktree_from_clone "$GIT_REPO" "${GIT_BRANCH:-main}"
     WORK_DIR="$WORKTREE_PATH"

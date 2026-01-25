@@ -47,10 +47,11 @@ Examples:
 
 // Subcommand flags
 var (
-	ecsCluster    string
-	ecsRegion     string
-	ecsLogsFollow bool
-	ecsLogsTail   int
+	ecsCluster     string
+	ecsRegion      string
+	ecsLogsFollow  bool
+	ecsLogsTail    int
+	prewarmWorkers int
 )
 
 func init() {
@@ -69,6 +70,10 @@ func init() {
 	ecsCmd.AddCommand(ecsLogsCmd)
 	ecsCmd.AddCommand(ecsStatusCmd)
 	ecsCmd.AddCommand(ecsExecCmd)
+	ecsCmd.AddCommand(ecsPrewarmCmd)
+
+	// Prewarm command flags
+	ecsPrewarmCmd.Flags().IntVar(&prewarmWorkers, "workers", 4, "Number of worktrees to create")
 
 	// Logs command flags
 	ecsLogsCmd.Flags().BoolVarP(&ecsLogsFollow, "follow", "f", false, "Follow log output")
@@ -801,6 +806,123 @@ func runECSStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
+	return nil
+}
+
+// ============================================================================
+// ecs prewarm - Pre-warm repos and worktrees on EFS
+// ============================================================================
+
+var ecsPrewarmCmd = &cobra.Command{
+	Use:   "prewarm <profile>",
+	Short: "Pre-warm repos and worktrees on EFS for faster boot",
+	Long: `Pre-warm a profile's repository and worktrees on EFS.
+
+This command SSMs into a running task and creates:
+1. A shared base repository clone
+2. Multiple worktrees for parallel workers
+
+This dramatically speeds up boot time since containers don't need to clone.
+
+Examples:
+  frank ecs prewarm enkai              # Pre-warm with 4 workers (default)
+  frank ecs prewarm enkai --workers 8  # Pre-warm with 8 workers`,
+	Args: cobra.ExactArgs(1),
+	RunE: runECSPrewarm,
+}
+
+func runECSPrewarm(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	profileName := args[0]
+
+	// Load profile configuration
+	p, err := profile.GetProfile(profileName)
+	if err != nil {
+		return fmt.Errorf("profile %q not found. Create it with: frank profile add %s --repo <url>", profileName, profileName)
+	}
+
+	// Find a running task to execute the prewarm script
+	client, err := getECSClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	// List all tasks
+	listResult, err := client.ListTasks(ctx, &ecs.ListTasksInput{
+		Cluster: aws.String(ecsCluster),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	if len(listResult.TaskArns) == 0 {
+		return fmt.Errorf("no running tasks found. Start a task first with 'frank ecs run' or 'frank ecs start <profile>'")
+	}
+
+	// Find a running task with execute command enabled
+	descResult, err := client.DescribeTasks(ctx, &ecs.DescribeTasksInput{
+		Cluster: aws.String(ecsCluster),
+		Tasks:   listResult.TaskArns,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to describe tasks: %w", err)
+	}
+
+	var targetTaskID string
+	for _, task := range descResult.Tasks {
+		if task.EnableExecuteCommand && aws.ToString(task.LastStatus) == "RUNNING" {
+			targetTaskID = extractTaskID(*task.TaskArn)
+			break
+		}
+	}
+
+	if targetTaskID == "" {
+		return fmt.Errorf("no running task with execute command enabled. Start a task first")
+	}
+
+	branch := p.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	// Build the prewarm command
+	prewarmScript := fmt.Sprintf("/usr/local/bin/prewarm.sh %s %s %d %s",
+		profileName, p.Repo, prewarmWorkers, branch)
+
+	awsArgs := []string{
+		"ecs", "execute-command",
+		"--cluster", ecsCluster,
+		"--task", targetTaskID,
+		"--container", "frank",
+		"--interactive",
+		"--command", prewarmScript,
+	}
+
+	if ecsRegion != "" {
+		awsArgs = append([]string{"--region", ecsRegion}, awsArgs...)
+	}
+
+	fmt.Printf("Pre-warming profile %q with %d workers...\n", profileName, prewarmWorkers)
+	fmt.Printf("Using task: %s\n", color.CyanString(targetTaskID))
+	fmt.Printf("Repository: %s\n", p.Repo)
+	fmt.Printf("Branch: %s\n\n", branch)
+
+	// Execute the prewarm script via SSM
+	awsCmd := exec.Command("aws", awsArgs...)
+	awsCmd.Stdin = os.Stdin
+	awsCmd.Stdout = os.Stdout
+	awsCmd.Stderr = os.Stderr
+
+	if err := awsCmd.Run(); err != nil {
+		return fmt.Errorf("failed to execute prewarm: %w", err)
+	}
+
+	fmt.Printf("\n%s Pre-warm complete!\n", color.GreenString("✓"))
+	fmt.Printf("\nTo use pre-warmed worktrees, start containers with worker IDs:\n")
+	for i := 1; i <= prewarmWorkers; i++ {
+		fmt.Printf("  CONTAINER_NAME=%s-%d\n", profileName, i)
+	}
+
 	return nil
 }
 

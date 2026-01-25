@@ -113,6 +113,10 @@ RUN chmod +x /usr/local/bin/status-server.py
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Copy prewarm script for pre-creating repos and worktrees
+COPY build/prewarm.sh /usr/local/bin/prewarm.sh
+RUN chmod +x /usr/local/bin/prewarm.sh
+
 # Environment
 ENV HOME=/root
 ENV PATH="/root/.local/bin:${PATH}"
