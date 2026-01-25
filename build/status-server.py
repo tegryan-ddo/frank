@@ -315,6 +315,15 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(version).encode())
                 return
 
+            if path == '/status/processes':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                proc_stats = get_claude_processes()
+                self.wfile.write(json.dumps(proc_stats, indent=2).encode())
+                return
+
             # Static file serving
             # Handle directory requests (serve index.html)
             if path == '/' or path == '':
@@ -455,6 +464,203 @@ def is_claude_running():
         return result.returncode == 0
     except:
         return False
+
+
+def get_process_stats(pid):
+    """Get detailed stats for a process from /proc filesystem."""
+    stats = {
+        'pid': pid,
+        'name': None,
+        'state': None,
+        'cpu_percent': 0,
+        'memory_mb': 0,
+        'memory_percent': 0,
+        'threads': 0,
+        'disk_read_mb': 0,
+        'disk_write_mb': 0,
+        'cmdline': None,
+    }
+
+    try:
+        # Get process name and state from /proc/<pid>/stat
+        with open(f'/proc/{pid}/stat') as f:
+            stat_line = f.read()
+            # Format: pid (comm) state ppid ...
+            # comm can contain spaces and parentheses, so find the last )
+            comm_start = stat_line.index('(')
+            comm_end = stat_line.rindex(')')
+            stats['name'] = stat_line[comm_start + 1:comm_end]
+            fields = stat_line[comm_end + 2:].split()
+            stats['state'] = fields[0]  # State is first field after comm
+            stats['threads'] = int(fields[17]) if len(fields) > 17 else 1
+
+            # CPU time: utime (field 13) + stime (field 14) in clock ticks
+            utime = int(fields[11]) if len(fields) > 11 else 0
+            stime = int(fields[12]) if len(fields) > 12 else 0
+            # Store raw ticks for later CPU calculation
+            stats['_cpu_ticks'] = utime + stime
+    except Exception as e:
+        log(f"Error reading /proc/{pid}/stat: {e}")
+
+    try:
+        # Get memory info from /proc/<pid>/status
+        with open(f'/proc/{pid}/status') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    # VmRSS is in kB
+                    kb = int(line.split()[1])
+                    stats['memory_mb'] = round(kb / 1024, 1)
+                    break
+    except Exception as e:
+        log(f"Error reading /proc/{pid}/status: {e}")
+
+    try:
+        # Get disk I/O from /proc/<pid>/io
+        with open(f'/proc/{pid}/io') as f:
+            for line in f:
+                if line.startswith('read_bytes:'):
+                    stats['disk_read_mb'] = round(int(line.split()[1]) / (1024 * 1024), 2)
+                elif line.startswith('write_bytes:'):
+                    stats['disk_write_mb'] = round(int(line.split()[1]) / (1024 * 1024), 2)
+    except Exception as e:
+        # io file may not be accessible
+        pass
+
+    try:
+        # Get command line
+        with open(f'/proc/{pid}/cmdline') as f:
+            cmdline = f.read().replace('\x00', ' ').strip()
+            # Truncate long command lines
+            stats['cmdline'] = cmdline[:200] if len(cmdline) > 200 else cmdline
+    except:
+        pass
+
+    # Calculate memory percent
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    total_kb = int(line.split()[1])
+                    stats['memory_percent'] = round((stats['memory_mb'] * 1024 / total_kb) * 100, 1)
+                    break
+    except:
+        pass
+
+    return stats
+
+
+def get_container_network_stats():
+    """Get network stats for the container from /proc/net/dev."""
+    network = {
+        'rx_mb': 0,
+        'tx_mb': 0,
+        'rx_packets': 0,
+        'tx_packets': 0,
+    }
+
+    try:
+        with open('/proc/net/dev') as f:
+            for line in f:
+                line = line.strip()
+                # Skip header lines
+                if ':' not in line:
+                    continue
+                # Parse interface: rx_bytes rx_packets ... tx_bytes tx_packets ...
+                iface, data = line.split(':')
+                iface = iface.strip()
+                # Skip loopback
+                if iface == 'lo':
+                    continue
+                fields = data.split()
+                if len(fields) >= 10:
+                    network['rx_mb'] += int(fields[0]) / (1024 * 1024)
+                    network['rx_packets'] += int(fields[1])
+                    network['tx_mb'] += int(fields[8]) / (1024 * 1024)
+                    network['tx_packets'] += int(fields[9])
+    except Exception as e:
+        log(f"Error reading /proc/net/dev: {e}")
+
+    network['rx_mb'] = round(network['rx_mb'], 2)
+    network['tx_mb'] = round(network['tx_mb'], 2)
+
+    return network
+
+
+def get_claude_processes():
+    """Find all Claude-related processes and their stats."""
+    import subprocess
+
+    processes = []
+    process_map = {}  # pid -> stats
+
+    try:
+        # Find all Claude-related processes
+        # This includes: claude, node (for claude), python (for MCP servers), etc.
+        result = subprocess.run(
+            ['ps', 'aux'],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            for line in lines[1:]:  # Skip header
+                fields = line.split(None, 10)
+                if len(fields) < 11:
+                    continue
+
+                pid = fields[1]
+                cpu = fields[2]
+                mem = fields[3]
+                command = fields[10]
+
+                # Filter for Claude-related processes
+                is_claude = any(keyword in command.lower() for keyword in [
+                    'claude',
+                    '/usr/local/bin/claude',
+                    'node.*claude',
+                    'mcp',
+                    'sequential-thinking',
+                    'context7',
+                    'serena',
+                    'playwright',
+                ])
+
+                if is_claude:
+                    try:
+                        stats = get_process_stats(int(pid))
+                        stats['cpu_percent'] = float(cpu)
+                        stats['memory_percent'] = float(mem)
+                        processes.append(stats)
+                    except:
+                        pass
+
+    except Exception as e:
+        log(f"Error getting claude processes: {e}")
+
+    # Also get total container stats
+    container_stats = {
+        'total_memory_mb': 0,
+        'total_cpu_percent': 0,
+        'process_count': len(processes),
+    }
+
+    for p in processes:
+        container_stats['total_memory_mb'] += p.get('memory_mb', 0)
+        container_stats['total_cpu_percent'] += p.get('cpu_percent', 0)
+
+    container_stats['total_memory_mb'] = round(container_stats['total_memory_mb'], 1)
+    container_stats['total_cpu_percent'] = round(container_stats['total_cpu_percent'], 1)
+
+    # Get network stats (container-level)
+    network = get_container_network_stats()
+
+    return {
+        'processes': processes,
+        'container': container_stats,
+        'network': network,
+        'timestamp': datetime.now().isoformat(),
+    }
 
 def get_claude_status():
     """Read Claude Code status from various sources."""
