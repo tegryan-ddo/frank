@@ -503,9 +503,177 @@
             background: #3c3c3c;
             cursor: not-allowed;
         }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #1e1e1e;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease-out;
+        }
+
+        .loading-overlay.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .loading-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            max-width: 600px;
+            padding: 0 24px;
+        }
+
+        .loading-title {
+            font-size: 48px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #4fc3f7, #7c4dff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+
+        .loading-subtitle {
+            font-size: 14px;
+            color: #808080;
+            margin-bottom: 48px;
+        }
+
+        .loading-trivia {
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 48px;
+        }
+
+        .loading-trivia-text {
+            font-size: 15px;
+            color: #b0b0b0;
+            line-height: 1.6;
+            font-style: italic;
+            transition: opacity 0.4s ease;
+        }
+
+        .loading-progress {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 320px;
+            margin: 0 auto;
+        }
+
+        .loading-step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: #555;
+            transition: color 0.3s ease;
+        }
+
+        .loading-step.active {
+            color: #b0b0b0;
+        }
+
+        .loading-step.done {
+            color: #6a9955;
+        }
+
+        .loading-step-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid #3c3c3c;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .loading-step.active .loading-step-icon {
+            border-color: #4fc3f7;
+            box-shadow: 0 0 8px rgba(79, 195, 247, 0.3);
+        }
+
+        .loading-step.active .loading-step-icon::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4fc3f7;
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+
+        .loading-step.done .loading-step-icon {
+            border-color: #6a9955;
+            background: #6a9955;
+        }
+
+        .loading-step.done .loading-step-icon::after {
+            content: '\2713';
+            font-size: 10px;
+            color: #fff;
+            line-height: 1;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.6); }
+        }
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <canvas class="loading-canvas" id="loading-canvas"></canvas>
+        <div class="loading-content">
+            <div class="loading-title">Frank</div>
+            <div class="loading-subtitle">Preparing your environment</div>
+            <div class="loading-trivia">
+                <div class="loading-trivia-text" id="trivia-text"></div>
+            </div>
+            <div class="loading-progress">
+                <div class="loading-step active" id="step-workspace">
+                    <span class="loading-step-icon"></span>
+                    <span>Setting up workspace...</span>
+                </div>
+                <div class="loading-step" id="step-plugins">
+                    <span class="loading-step-icon"></span>
+                    <span>Installing plugins...</span>
+                </div>
+                <div class="loading-step" id="step-terminals">
+                    <span class="loading-step-icon"></span>
+                    <span>Starting terminals...</span>
+                </div>
+                <div class="loading-step" id="step-ready">
+                    <span class="loading-step-icon"></span>
+                    <span>Almost ready...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>Frank</h1>
         <div class="tabs">
@@ -1087,6 +1255,246 @@
                 }
             });
         });
+        // =============================================
+        // Loading Overlay - Neural Network Animation
+        // =============================================
+        (function() {
+            const overlay = document.getElementById('loading-overlay');
+            if (!overlay) return;
+
+            const canvas = document.getElementById('loading-canvas');
+            const ctx = canvas.getContext('2d');
+            let animationId = null;
+
+            // AI Trivia
+            const trivia = [
+                "GPT-3 has 175 billion parameters \u2014 roughly 1,000\u00d7 more than GPT-2.",
+                "The term 'artificial intelligence' was coined at a Dartmouth workshop in 1956.",
+                "Claude was named after Claude Shannon, the father of information theory.",
+                "The first neural network, the Perceptron, was built in 1958 using physical hardware.",
+                "A single Google search uses about the same energy as turning on a light for 17 seconds.",
+                "The Turing Test was proposed by Alan Turing in 1950 to measure machine intelligence.",
+                "Deep Blue defeated world chess champion Garry Kasparov in 1997.",
+                "The ImageNet dataset that sparked the deep learning revolution contains 14 million images.",
+                "AlphaGo defeated world Go champion Lee Sedol in 2016 with a move no human had ever played.",
+                "The transformer architecture behind modern LLMs was introduced in the 2017 paper 'Attention Is All You Need'.",
+                "ELIZA, created in 1966, was one of the first chatbots and mimicked a therapist.",
+                "The human brain has roughly 86 billion neurons connected by 100 trillion synapses.",
+                "Backpropagation, the algorithm that trains neural networks, was popularized in 1986.",
+                "The word 'robot' comes from the Czech word 'robota', meaning forced labor.",
+                "Geoffrey Hinton, Yann LeCun, and Yoshua Bengio are known as the 'Godfathers of Deep Learning'.",
+                "GPUs were originally designed for gaming but became essential for training AI models.",
+                "The MNIST handwritten digit dataset has been the 'Hello World' of machine learning since 1998.",
+                "Reinforcement learning from human feedback (RLHF) helps align AI outputs with human preferences.",
+                "The concept of 'attention' in transformers lets models focus on relevant parts of their input.",
+                "Neural networks are loosely inspired by biological neurons but work very differently.",
+                "Moore's Law predicted transistor density doubling every ~2 years, enabling modern AI hardware.",
+                "The first AI winter lasted from 1974 to 1980 when funding dried up due to unmet expectations.",
+                "Word2Vec showed that word relationships could be captured as vector arithmetic: king \u2212 man + woman \u2248 queen.",
+                "Generative adversarial networks (GANs) use two competing neural networks to create realistic outputs.",
+                "The bitter lesson by Rich Sutton: general methods leveraging computation beat specialized approaches.",
+                "Claude Shannon's 1948 paper 'A Mathematical Theory of Communication' founded information theory.",
+                "Tokenizers break text into subword pieces \u2014 'unhappiness' might become 'un', 'happiness'.",
+                "The context window of an LLM determines how much text it can consider at once.",
+                "Batch normalization, introduced in 2015, made training deep networks significantly easier.",
+                "The term 'hallucination' in AI refers to confident but factually incorrect outputs."
+            ];
+
+            // Shuffle trivia
+            for (let i = trivia.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [trivia[i], trivia[j]] = [trivia[j], trivia[i]];
+            }
+
+            let triviaIndex = 0;
+            const triviaEl = document.getElementById('trivia-text');
+            triviaEl.textContent = trivia[0];
+
+            const triviaInterval = setInterval(() => {
+                triviaEl.style.opacity = '0';
+                setTimeout(() => {
+                    triviaIndex = (triviaIndex + 1) % trivia.length;
+                    triviaEl.textContent = trivia[triviaIndex];
+                    triviaEl.style.opacity = '1';
+                }, 400);
+            }, 5000);
+
+            // Canvas setup
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Particles / nodes
+            const nodes = [];
+            const nodeCount = Math.min(60, Math.floor(window.innerWidth * window.innerHeight / 15000));
+            const connectionDist = 150;
+
+            for (let i = 0; i < nodeCount; i++) {
+                nodes.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    vx: (Math.random() - 0.5) * 0.5,
+                    vy: (Math.random() - 0.5) * 0.5,
+                    radius: Math.random() * 2 + 1,
+                    pulse: Math.random() * Math.PI * 2,
+                    pulseSpeed: Math.random() * 0.02 + 0.01
+                });
+            }
+
+            function drawNetwork() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Update and draw connections
+                for (let i = 0; i < nodes.length; i++) {
+                    const a = nodes[i];
+                    a.x += a.vx;
+                    a.y += a.vy;
+                    a.pulse += a.pulseSpeed;
+
+                    // Wrap around edges
+                    if (a.x < 0) a.x = canvas.width;
+                    if (a.x > canvas.width) a.x = 0;
+                    if (a.y < 0) a.y = canvas.height;
+                    if (a.y > canvas.height) a.y = 0;
+
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        const b = nodes[j];
+                        const dx = a.x - b.x;
+                        const dy = a.y - b.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < connectionDist) {
+                            const alpha = (1 - dist / connectionDist) * 0.15;
+                            ctx.beginPath();
+                            ctx.moveTo(a.x, a.y);
+                            ctx.lineTo(b.x, b.y);
+                            ctx.strokeStyle = `rgba(124, 77, 255, ${alpha})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                // Draw nodes
+                for (const node of nodes) {
+                    const glow = Math.sin(node.pulse) * 0.3 + 0.7;
+                    const r = node.radius * glow;
+
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(79, 195, 247, ${glow * 0.6})`;
+                    ctx.fill();
+
+                    // Subtle outer glow
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, r * 2.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(79, 195, 247, ${glow * 0.08})`;
+                    ctx.fill();
+                }
+
+                animationId = requestAnimationFrame(drawNetwork);
+            }
+
+            drawNetwork();
+
+            // Progress tracking
+            const steps = ['step-workspace', 'step-plugins', 'step-terminals', 'step-ready'];
+            let currentStep = 0;
+
+            function setStep(index) {
+                for (let i = 0; i < steps.length; i++) {
+                    const el = document.getElementById(steps[i]);
+                    el.classList.remove('active', 'done');
+                    if (i < index) el.classList.add('done');
+                    else if (i === index) el.classList.add('active');
+                }
+                currentStep = index;
+            }
+
+            // Readiness detection: poll status + check terminal iframes
+            let terminalsReady = false;
+            let statusReady = false;
+
+            async function checkDetailedStatus() {
+                try {
+                    const detailedUrl = STATUS_URL.replace('/status', '/status/detailed');
+                    const response = await fetch(detailedUrl, { signal: AbortSignal.timeout(3000) });
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Status server is responding
+                        if (currentStep < 1) setStep(1);
+
+                        // Check if Claude process is connected
+                        if (data.connected !== false) {
+                            statusReady = true;
+                            if (currentStep < 2) setStep(2);
+                        }
+                        return data;
+                    }
+                } catch (e) {
+                    // Status not ready yet
+                }
+                return null;
+            }
+
+            async function checkTerminals() {
+                const claudeFrame = document.getElementById('claude-frame');
+                const bashFrame = document.getElementById('bash-frame');
+
+                try {
+                    // Try fetching the terminal URLs to see if they respond
+                    const results = await Promise.allSettled([
+                        fetch(claudeFrame.src, { mode: 'no-cors', signal: AbortSignal.timeout(3000) }),
+                        fetch(bashFrame.src, { mode: 'no-cors', signal: AbortSignal.timeout(3000) })
+                    ]);
+
+                    // With no-cors, a successful response (even opaque) means the server is up
+                    const allOk = results.every(r => r.status === 'fulfilled');
+                    if (allOk) {
+                        terminalsReady = true;
+                    }
+                } catch (e) {
+                    // Terminals not ready
+                }
+            }
+
+            function dismissOverlay() {
+                clearInterval(triviaInterval);
+                clearInterval(readinessInterval);
+
+                setStep(3); // "Almost ready..." -> done
+                setTimeout(() => {
+                    // Mark final step done
+                    document.getElementById(steps[3]).classList.remove('active');
+                    document.getElementById(steps[3]).classList.add('done');
+
+                    setTimeout(() => {
+                        overlay.classList.add('fade-out');
+                        setTimeout(() => {
+                            overlay.remove();
+                            if (animationId) cancelAnimationFrame(animationId);
+                            window.removeEventListener('resize', resizeCanvas);
+                        }, 500);
+                    }, 300);
+                }, 400);
+            }
+
+            const readinessInterval = setInterval(async () => {
+                await checkDetailedStatus();
+                await checkTerminals();
+
+                if (statusReady && terminalsReady) {
+                    dismissOverlay();
+                }
+            }, 2000);
+
+            // Initial check
+            checkDetailedStatus();
+            checkTerminals();
+        })();
     </script>
 </body>
 </html>
