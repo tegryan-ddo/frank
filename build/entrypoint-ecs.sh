@@ -537,7 +537,11 @@ else
     BASH_BASE_PATH="/bash"
 fi
 
-# Start bash terminal with base path for ALB routing
+# Configure tmux for better session handling
+export TMUX_TMPDIR=/tmp/tmux-sessions
+mkdir -p "$TMUX_TMPDIR"
+
+# Start bash terminal with tmux persistence
 echo "Starting bash terminal on port $BASH_PORT (path: $BASH_BASE_PATH)..."
 ttyd -p "${BASH_PORT}" -W \
     -t fontSize=16 \
@@ -545,7 +549,7 @@ ttyd -p "${BASH_PORT}" -W \
     -t theme="${TTYD_THEME}" \
     --ping-interval 60 \
     --base-path "$BASH_BASE_PATH" \
-    bash &
+    tmux-session.sh frank-bash bash &
 BASH_PID=$!
 
 # Wait for bash terminal to be ready
@@ -565,7 +569,7 @@ else
     echo "  .claude directory: MISSING"
 fi
 
-# Start Claude terminal (foreground) with base path for ALB routing
+# Start Claude terminal (foreground) with tmux persistence
 echo "Starting Claude terminal on port $TTYD_PORT (path: $CLAUDE_BASE_PATH)..."
 echo "=== Frank ECS Container Ready ==="
 
@@ -575,4 +579,4 @@ exec ttyd -p "${TTYD_PORT}" -W \
     -t theme="${TTYD_THEME}" \
     --ping-interval 60 \
     --base-path "$CLAUDE_BASE_PATH" \
-    claude
+    tmux-session.sh frank-claude claude

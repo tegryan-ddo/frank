@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     less \
     vim \
+    tmux \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
@@ -108,6 +109,11 @@ COPY build/.claude/settings.local.json /root/.claude/settings.local.json
 COPY build/index.html /usr/local/share/frank/index.html
 COPY build/status-server.py /usr/local/bin/status-server.py
 RUN chmod +x /usr/local/bin/status-server.py
+
+# Copy tmux config and session wrapper for persistent sessions
+COPY build/.tmux.conf /root/.tmux.conf
+COPY build/tmux-session.sh /usr/local/bin/tmux-session.sh
+RUN chmod +x /usr/local/bin/tmux-session.sh
 
 # Copy ECS-specific entrypoint
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
