@@ -112,6 +112,7 @@ RUN chmod +x /usr/local/bin/status-server.py
 
 # Copy tmux config and session wrapper for persistent sessions
 COPY build/.tmux.conf /root/.tmux.conf
+RUN sed -i 's/\r$//' /root/.tmux.conf
 COPY build/tmux-session.sh /usr/local/bin/tmux-session.sh
 RUN chmod +x /usr/local/bin/tmux-session.sh
 
