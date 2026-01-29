@@ -139,8 +139,8 @@ EXTERNAL_PLUGINS=(
     "greptile"
 )
 
-install_plugins() {
-    echo "=== Installing Claude Code Plugins ==="
+clone_plugins_repo() {
+    echo "=== Preparing Claude Code Plugins ==="
 
     # Clone or update plugins repo
     if [ -d "$PLUGINS_CACHE/.git" ]; then
@@ -154,43 +154,81 @@ install_plugins() {
         }
     fi
 
-    # Create plugins directory
+    # Get commit SHA for versioning
+    PLUGINS_GIT_SHA=$(git -C "$PLUGINS_CACHE" rev-parse --short=12 HEAD 2>/dev/null || echo "unknown")
+    echo "Plugins repo version: $PLUGINS_GIT_SHA"
+}
+
+install_plugins() {
+    local project_path="$1"
+    echo "=== Installing Claude Code Plugins ==="
+    echo "Project path: $project_path"
+
+    local cache_base="$PLUGINS_DIR/cache/claude-plugins-official"
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    local git_sha
+    git_sha=$(git -C "$PLUGINS_CACHE" rev-parse HEAD 2>/dev/null || echo "")
+
     mkdir -p "$PLUGINS_DIR"
+
+    # Start building installed_plugins.json
+    local plugins_json='{"version":2,"plugins":{'
+    local first_entry=true
+
+    # Install a single plugin to cache and return JSON entry
+    install_single_plugin() {
+        local plugin_name="$1"
+        local src_dir="$2"
+        local version="$PLUGINS_GIT_SHA"
+        local install_path="$cache_base/$plugin_name/$version"
+
+        if [ ! -d "$src_dir" ]; then
+            echo "  WARNING: Plugin not found: $plugin_name"
+            return 1
+        fi
+
+        echo "  Installing plugin: $plugin_name"
+
+        # Create cache directory and copy plugin files (excluding .claude-plugin metadata)
+        mkdir -p "$install_path"
+        cp -r "$src_dir/skills" "$install_path/" 2>/dev/null || true
+        cp -r "$src_dir/README.md" "$install_path/" 2>/dev/null || true
+
+        # Also create the symlink for backward compat
+        ln -sf "$src_dir" "$PLUGINS_DIR/$plugin_name" 2>/dev/null || true
+
+        # Build JSON entry
+        local entry="\"${plugin_name}@claude-plugins-official\":[{\"scope\":\"project\",\"projectPath\":\"${project_path}\",\"installPath\":\"${install_path}\",\"version\":\"${version}\",\"installedAt\":\"${now}\",\"lastUpdated\":\"${now}\",\"gitCommitSha\":\"${git_sha}\"}]"
+
+        if [ "$first_entry" = true ]; then
+            first_entry=false
+        else
+            plugins_json="${plugins_json},"
+        fi
+        plugins_json="${plugins_json}${entry}"
+    }
 
     # Install internal plugins
     for plugin in "${INTERNAL_PLUGINS[@]}"; do
-        local src="$PLUGINS_CACHE/plugins/$plugin"
-        local dest="$PLUGINS_DIR/$plugin"
-        if [ -d "$src" ]; then
-            if [ ! -e "$dest" ]; then
-                echo "  Installing plugin: $plugin"
-                ln -s "$src" "$dest"
-            fi
-        else
-            echo "  WARNING: Plugin not found: $plugin"
-        fi
+        install_single_plugin "$plugin" "$PLUGINS_CACHE/plugins/$plugin"
     done
 
     # Install external plugins
     for plugin in "${EXTERNAL_PLUGINS[@]}"; do
-        local src="$PLUGINS_CACHE/external_plugins/$plugin"
-        local dest="$PLUGINS_DIR/$plugin"
-        if [ -d "$src" ]; then
-            if [ ! -e "$dest" ]; then
-                echo "  Installing external plugin: $plugin"
-                ln -s "$src" "$dest"
-            fi
-        else
-            echo "  WARNING: External plugin not found: $plugin"
-        fi
+        install_single_plugin "$plugin" "$PLUGINS_CACHE/external_plugins/$plugin"
     done
 
-    echo "Plugins installed to $PLUGINS_DIR"
-    ls -la "$PLUGINS_DIR" 2>/dev/null || true
+    # Close JSON and write
+    plugins_json="${plugins_json}}}"
+    echo "$plugins_json" > "$PLUGINS_DIR/installed_plugins.json"
+
+    echo "Plugins installed and registered to $PLUGINS_DIR"
+    echo "  Registered $(echo "$plugins_json" | grep -o '@claude-plugins-official' | wc -l) plugin(s)"
 }
 
-# Install plugins (must complete before Claude starts to avoid race condition)
-install_plugins
+# Clone plugins repo early (must complete before Claude starts)
+clone_plugins_repo
 
 # -----------------------------------------------------------------------------
 # Worktree Setup
@@ -305,6 +343,11 @@ setup_worktree_from_clone() {
 
     # Clone repo to base location if not exists, or re-clone if URL changed
     if [ ! -d "$REPO_BASE/.git" ]; then
+        # Remove stale directory if it exists without .git (e.g., from a failed clone)
+        if [ -d "$REPO_BASE" ]; then
+            echo "Removing stale directory at $REPO_BASE (no .git found)..."
+            rm -rf "$REPO_BASE"
+        fi
         echo "Cloning repository to $REPO_BASE..."
         git clone "$repo_url" "$REPO_BASE"
     else
@@ -420,6 +463,8 @@ fi
 cd "$WORK_DIR"
 echo "Current directory: $(pwd)"
 
+# Install and register plugins now that we know the working directory
+install_plugins "$WORK_DIR"
 
 # Common ttyd theme
 TTYD_THEME='{"background":"#1e1e1e","foreground":"#d4d4d4","cursor":"#d4d4d4","selectionBackground":"#264f78","black":"#1e1e1e","red":"#f44747","green":"#6a9955","yellow":"#dcdcaa","blue":"#569cd6","magenta":"#c586c0","cyan":"#4ec9b0","white":"#d4d4d4","brightBlack":"#808080","brightRed":"#f44747","brightGreen":"#6a9955","brightYellow":"#dcdcaa","brightBlue":"#569cd6","brightMagenta":"#c586c0","brightCyan":"#4ec9b0","brightWhite":"#ffffff"}'

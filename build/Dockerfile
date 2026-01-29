@@ -91,10 +91,10 @@ RUN mkdir -p /root/.config/claude-code \
     && mkdir -p /workspace
 
 # Copy MCP configuration
-COPY mcp.json /root/.claude/mcp.json
+COPY .claude/mcp.json /root/.claude/mcp.json
 
 # Copy CLAUDE.md
-COPY CLAUDE.md /root/.claude/CLAUDE.md
+COPY .claude/CLAUDE.md /root/.claude/CLAUDE.md
 
 # Copy combined view HTML template
 COPY index.html /usr/local/share/frank/index.html
