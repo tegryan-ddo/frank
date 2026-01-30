@@ -123,6 +123,9 @@ export class FrankStack extends cdk.Stack {
     // Grant S3 analytics bucket write access to task role
     analyticsBucket.grantWrite(taskDefinition.taskRole);
 
+    // Grant credential sync write access to Claude credentials secret
+    claudeCredentialsSecret.grantWrite(taskDefinition.taskRole);
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
