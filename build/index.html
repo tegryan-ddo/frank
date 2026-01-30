@@ -1732,6 +1732,7 @@
 
             try {
                 const sendUrl = STATUS_URL.replace('/status', '/status/send-prompt');
+                console.log('Sending to:', sendUrl, 'text length:', combined.length);
                 const response = await fetch(sendUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1742,19 +1743,23 @@
                     }),
                 });
 
+                console.log('Response status:', response.status);
                 if (response.ok) {
                     const data = await response.json();
+                    console.log('Response data:', data);
                     if (data.success) {
                         showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
                     } else {
-                        showToast('Failed to send: ' + (data.message || 'Unknown error'));
+                        showToast('Failed: ' + (data.message || data.error || 'Unknown error'));
                     }
                 } else {
-                    showToast('Failed to send (server error)');
+                    const errorText = await response.text();
+                    console.error('Server error response:', errorText);
+                    showToast(`Failed: HTTP ${response.status}`);
                 }
             } catch (e) {
                 console.error('Send failed:', e);
-                showToast('Failed to send - is the server running?');
+                showToast('Network error: ' + e.message);
             } finally {
                 pasteBtn.disabled = !promptItems.some(item => item.text.trim());
                 pasteBtn.textContent = 'Send to Claude';
