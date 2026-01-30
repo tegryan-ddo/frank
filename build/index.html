@@ -583,6 +583,45 @@
             border-color: #0e639c;
         }
 
+        .prompt-item-checkbox {
+            width: 14px;
+            height: 14px;
+            accent-color: #0e639c;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .prompt-item.deselected {
+            opacity: 0.5;
+            border-color: #2d2d2d;
+        }
+
+        .prompt-item.deselected .prompt-item-header {
+            background: #252526;
+        }
+
+        .prompt-item.deselected textarea {
+            color: #6d6d6d;
+            background: #1a1a1a;
+        }
+
+        .prompt-select-all-btn {
+            padding: 6px;
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .prompt-select-all-btn:hover {
+            background: #3c3c3c;
+            color: #ffffff;
+        }
+
         .prompt-item textarea {
             width: 100%;
             min-height: 48px;
@@ -909,6 +948,115 @@
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.4; transform: scale(0.6); }
         }
+
+        /* Mobile Tab Bar - hidden by default */
+        .mobile-tab-bar {
+            display: none;
+        }
+
+        /* Mobile Responsive Layout */
+        @media (max-width: 768px) {
+            .tabs {
+                display: none !important;
+            }
+
+            .context-panel {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 48px;
+                width: 100%;
+                z-index: 100;
+                border-left: none;
+            }
+
+            .context-panel.mobile-visible {
+                display: flex;
+            }
+
+            .main-container {
+                position: relative;
+            }
+
+            .terminals-wrapper {
+                position: relative;
+            }
+
+            .terminals-wrapper .pane {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                display: none;
+            }
+
+            .terminals-wrapper .pane.mobile-active {
+                display: flex;
+            }
+
+            .terminals-wrapper .divider-h {
+                display: none !important;
+            }
+
+            .mobile-tab-bar {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 48px;
+                background: #252526;
+                border-top: 1px solid #3c3c3c;
+                z-index: 200;
+                padding-bottom: env(safe-area-inset-bottom, 0px);
+            }
+
+            .mobile-tab-bar button {
+                flex: 1;
+                background: transparent;
+                border: none;
+                color: #6d6d6d;
+                font-size: 10px;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 2px;
+                transition: color 0.15s;
+                padding: 4px 0;
+            }
+
+            .mobile-tab-bar button .tab-icon {
+                font-size: 18px;
+                line-height: 1;
+            }
+
+            .mobile-tab-bar button:hover {
+                color: #cccccc;
+            }
+
+            .mobile-tab-bar button.active {
+                color: #4fc3f7;
+            }
+
+            body {
+                padding-bottom: 48px;
+            }
+
+            .prompt-builder {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 48px;
+                z-index: 100;
+                background: #252526;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1086,7 +1234,10 @@
                 </div>
                 <div class="prompt-char-count" id="prompt-char-count"></div>
                 <div class="prompt-builder-actions">
-                    <button class="prompt-add-btn" id="prompt-add-btn">+ Add Item</button>
+                    <div class="action-row">
+                        <button class="prompt-add-btn" id="prompt-add-btn" style="flex:1">+ Add Item</button>
+                        <button class="prompt-select-all-btn" id="prompt-select-all-btn" title="Toggle select all">Select All</button>
+                    </div>
                     <div class="action-row">
                         <button class="prompt-send-btn" id="prompt-paste-btn" disabled>Send to Claude</button>
                         <button class="prompt-clear-btn" id="prompt-copy-btn" title="Copy to clipboard">Copy</button>
@@ -1098,6 +1249,14 @@
                     </label>
                 </div>
             </div>
+        </div>
+
+        <!-- Mobile Tab Bar -->
+        <div class="mobile-tab-bar" id="mobile-tab-bar">
+            <button class="active" data-view="claude"><span class="tab-icon">&#x1F4AC;</span>Claude</button>
+            <button data-view="bash"><span class="tab-icon">&#x1F4BB;</span>Bash</button>
+            <button data-view="stats"><span class="tab-icon">&#x1F4CA;</span>Stats</button>
+            <button data-view="prompt"><span class="tab-icon">&#x270F;</span>Prompt</button>
         </div>
 
         <!-- Toast notification -->
@@ -1551,6 +1710,10 @@
                 const saved = localStorage.getItem(PROMPT_STORAGE_KEY);
                 if (saved) {
                     promptItems = JSON.parse(saved);
+                    // Backfill selected property for old items
+                    promptItems.forEach(item => {
+                        if (item.selected === undefined) item.selected = true;
+                    });
                 }
             } catch (e) {
                 console.warn('Failed to load prompt items:', e);
@@ -1595,11 +1758,18 @@
 
             promptItems.forEach((item, index) => {
                 const el = document.createElement('div');
-                el.className = 'prompt-item' + (item.pinned ? ' pinned' : '');
+                el.className = 'prompt-item' + (item.pinned ? ' pinned' : '') + (item.selected === false ? ' deselected' : '');
                 el.dataset.index = index;
 
                 const header = document.createElement('div');
                 header.className = 'prompt-item-header';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'prompt-item-checkbox';
+                checkbox.checked = item.selected !== false;
+                checkbox.title = item.selected !== false ? 'Deselect (exclude from send)' : 'Select (include in send)';
+                checkbox.addEventListener('change', () => toggleSelectPromptItem(index));
 
                 const label = document.createElement('span');
                 label.className = 'prompt-item-label';
@@ -1632,6 +1802,7 @@
                 deleteBtn.title = 'Remove';
                 deleteBtn.addEventListener('click', () => removePromptItem(index));
 
+                header.appendChild(checkbox);
                 header.appendChild(label);
                 header.appendChild(moveUp);
                 header.appendChild(moveDown);
@@ -1661,22 +1832,27 @@
                 textarea.style.height = Math.max(48, textarea.scrollHeight) + 'px';
             });
 
-            pasteBtn.disabled = promptItems.filter(item => item.text.trim()).length < 2;
+            pasteBtn.disabled = promptItems.filter(item => item.selected !== false && item.text.trim()).length < 2;
             updatePromptCharCount();
         }
 
         function updatePromptCharCount() {
             const charCount = document.getElementById('prompt-char-count');
             const total = promptItems.reduce((sum, item) => sum + item.text.length, 0);
+            const selectedTotal = promptItems.filter(item => item.selected !== false).reduce((sum, item) => sum + item.text.length, 0);
             if (total > 0) {
-                charCount.textContent = total.toLocaleString() + ' chars';
+                if (selectedTotal < total) {
+                    charCount.textContent = selectedTotal.toLocaleString() + ' / ' + total.toLocaleString() + ' chars selected';
+                } else {
+                    charCount.textContent = total.toLocaleString() + ' chars';
+                }
             } else {
                 charCount.textContent = '';
             }
         }
 
         function addPromptItem() {
-            promptItems.push({ text: '', pinned: false });
+            promptItems.push({ text: '', pinned: false, selected: true });
             savePromptItems();
             renderPromptItems();
 
@@ -1703,6 +1879,19 @@
             renderPromptItems();
         }
 
+        function toggleSelectPromptItem(index) {
+            promptItems[index].selected = promptItems[index].selected === false ? true : false;
+            savePromptItems();
+            renderPromptItems();
+        }
+
+        function toggleSelectAll() {
+            const allSelected = promptItems.every(item => item.selected !== false);
+            promptItems.forEach(item => { item.selected = !allSelected; });
+            savePromptItems();
+            renderPromptItems();
+        }
+
         function movePromptItem(index, direction) {
             const newIndex = index + direction;
             if (newIndex < 0 || newIndex >= promptItems.length) return;
@@ -1724,6 +1913,7 @@
 
         function getCombinedPrompt() {
             return promptItems
+                .filter(item => item.selected !== false)
                 .map(item => item.text.trim())
                 .filter(text => text.length > 0)
                 .join('\n\n');
@@ -1783,8 +1973,8 @@
                     console.log('Response data:', data);
                     if (data.success) {
                         showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
-                        // Remove unpinned items, keep pinned ones
-                        promptItems = promptItems.filter(item => item.pinned);
+                        // Remove sent (selected+unpinned) items; keep unselected and pinned
+                        promptItems = promptItems.filter(item => item.selected === false || item.pinned);
                         savePromptItems();
                         renderPromptItems();
                     } else {
@@ -1799,7 +1989,7 @@
                 console.error('Send failed:', e);
                 showToast('Network error: ' + e.message);
             } finally {
-                pasteBtn.disabled = promptItems.filter(item => item.text.trim()).length < 2;
+                pasteBtn.disabled = promptItems.filter(item => item.selected !== false && item.text.trim()).length < 2;
                 pasteBtn.textContent = 'Send to Claude';
             }
         }
@@ -1809,10 +1999,97 @@
         document.getElementById('prompt-paste-btn').addEventListener('click', sendPromptToClaude);
         document.getElementById('prompt-copy-btn').addEventListener('click', copyPromptToClipboard);
         document.getElementById('prompt-clear-btn').addEventListener('click', clearPromptItems);
+        document.getElementById('prompt-select-all-btn').addEventListener('click', toggleSelectAll);
 
         // Initialize prompt builder
         loadPromptItems();
         renderPromptItems();
+
+        // Mobile Tab Switching
+        (function() {
+            let isMobile = false;
+            let currentMobileView = 'claude';
+
+            function applyMobileView(view) {
+                currentMobileView = view;
+                const claudePane = document.querySelector('.pane.claude');
+                const bashPane = document.querySelector('.pane.bash');
+                const contextPanel = document.getElementById('context-panel');
+                const promptBuilderPanel = document.getElementById('prompt-builder');
+                const contextContent = document.querySelector('.context-panel-content');
+
+                // Reset all
+                claudePane.classList.remove('mobile-active');
+                bashPane.classList.remove('mobile-active');
+                contextPanel.classList.remove('mobile-visible');
+
+                // Hide prompt builder for non-prompt views on mobile
+                if (view !== 'prompt') {
+                    promptBuilderPanel.classList.remove('visible');
+                }
+
+                if (view === 'claude') {
+                    claudePane.classList.add('mobile-active');
+                } else if (view === 'bash') {
+                    bashPane.classList.add('mobile-active');
+                } else if (view === 'stats') {
+                    contextPanel.classList.add('mobile-visible');
+                    contextContent.style.display = '';
+                    promptBuilderPanel.classList.remove('visible');
+                } else if (view === 'prompt') {
+                    contextPanel.classList.add('mobile-visible');
+                    contextContent.style.display = 'none';
+                    promptBuilderPanel.classList.add('visible');
+                }
+
+                // Update tab bar active state
+                document.querySelectorAll('#mobile-tab-bar button').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.view === view);
+                });
+            }
+
+            function handleResize() {
+                const wasMobile = isMobile;
+                isMobile = window.innerWidth <= 768;
+
+                if (isMobile && !wasMobile) {
+                    // Entering mobile
+                    applyMobileView(currentMobileView);
+                } else if (!isMobile && wasMobile) {
+                    // Leaving mobile — restore desktop layout
+                    const claudePane = document.querySelector('.pane.claude');
+                    const bashPane = document.querySelector('.pane.bash');
+                    const contextPanel = document.getElementById('context-panel');
+
+                    claudePane.classList.remove('mobile-active');
+                    bashPane.classList.remove('mobile-active');
+                    contextPanel.classList.remove('mobile-visible');
+
+                    // Restore context panel view based on saved preference
+                    const contextContent = document.querySelector('.context-panel-content');
+                    const promptBuilderPanel = document.getElementById('prompt-builder');
+                    if (prefs.contextPanel === 'prompt') {
+                        contextContent.style.display = 'none';
+                        promptBuilderPanel.classList.add('visible');
+                    } else {
+                        contextContent.style.display = '';
+                        promptBuilderPanel.classList.remove('visible');
+                    }
+                }
+            }
+
+            // Wire tab clicks
+            document.querySelectorAll('#mobile-tab-bar button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    applyMobileView(btn.dataset.view);
+                });
+            });
+
+            window.addEventListener('resize', handleResize);
+
+            // Initial check
+            handleResize();
+        })();
 
         // Feedback handling
         const feedbackButtons = document.getElementById('feedback-buttons');
