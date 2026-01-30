@@ -2,6 +2,7 @@
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { FrankStack } from '../lib/frank-stack';
+import { FrankPipelineStack } from '../lib/frank-pipeline-stack';
 
 const app = new cdk.App();
 
@@ -21,4 +22,11 @@ new FrankStack(app, 'FrankStack', {
   cognitoUserPoolId: 'us-east-1_zlw7qsJMJ',
   cognitoClientId: '66gneinplh8gnp8fjj5rrpsrsk',
   cognitoDomain: 'enkai-dev',
+});
+
+new FrankPipelineStack(app, 'FrankPipelineStack', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION || 'us-east-1',
+  },
 });
