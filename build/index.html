@@ -452,6 +452,254 @@
             border-color: #4ec9b0;
         }
 
+        /* Context Panel View Toggle */
+        .context-view-toggle {
+            display: flex;
+            gap: 2px;
+        }
+
+        .context-view-btn {
+            padding: 3px 8px;
+            background: transparent;
+            border: 1px solid #3c3c3c;
+            border-radius: 3px;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 10px;
+            transition: all 0.15s;
+        }
+
+        .context-view-btn:hover {
+            background: #3c3c3c;
+            color: #ffffff;
+        }
+
+        .context-view-btn.active {
+            background: #0e639c;
+            border-color: #0e639c;
+            color: #ffffff;
+        }
+
+        /* Prompt Builder */
+        .prompt-builder {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .prompt-builder.visible {
+            display: flex;
+        }
+
+        .prompt-builder-items {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            scrollbar-width: thin;
+            scrollbar-color: #3c3c3c #252526;
+        }
+
+        .prompt-builder-items::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .prompt-builder-items::-webkit-scrollbar-track {
+            background: #252526;
+        }
+
+        .prompt-builder-items::-webkit-scrollbar-thumb {
+            background: #3c3c3c;
+            border-radius: 3px;
+        }
+
+        .prompt-item {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            transition: border-color 0.15s;
+        }
+
+        .prompt-item:focus-within {
+            border-color: #0e639c;
+        }
+
+        .prompt-item-header {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 4px 6px;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3c3c3c;
+            border-radius: 3px 3px 0 0;
+        }
+
+        .prompt-item-label {
+            flex: 1;
+            font-size: 10px;
+            color: #9d9d9d;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .prompt-item-btn {
+            background: transparent;
+            border: none;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 4px;
+            border-radius: 2px;
+            line-height: 1;
+            transition: all 0.15s;
+        }
+
+        .prompt-item-btn:hover {
+            background: #3c3c3c;
+            color: #ffffff;
+        }
+
+        .prompt-item-btn.delete:hover {
+            background: #5a2d2d;
+            color: #f44747;
+        }
+
+        .prompt-item textarea {
+            width: 100%;
+            min-height: 48px;
+            background: #1e1e1e;
+            border: none;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            padding: 6px 8px;
+            resize: vertical;
+            outline: none;
+            border-radius: 0 0 3px 3px;
+        }
+
+        .prompt-item textarea::placeholder {
+            color: #6d6d6d;
+        }
+
+        .prompt-builder-actions {
+            padding: 8px;
+            border-top: 1px solid #3c3c3c;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .prompt-builder-actions .action-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .prompt-add-btn {
+            width: 100%;
+            padding: 6px;
+            background: #2d2d2d;
+            border: 1px dashed #3c3c3c;
+            border-radius: 4px;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.15s;
+        }
+
+        .prompt-add-btn:hover {
+            background: #3c3c3c;
+            border-color: #9d9d9d;
+            color: #ffffff;
+        }
+
+        .prompt-send-btn {
+            flex: 1;
+            padding: 8px;
+            background: #0e639c;
+            border: none;
+            border-radius: 4px;
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+
+        .prompt-send-btn:hover {
+            background: #1177bb;
+        }
+
+        .prompt-send-btn:disabled {
+            background: #3c3c3c;
+            color: #6d6d6d;
+            cursor: not-allowed;
+        }
+
+        .prompt-clear-btn {
+            padding: 8px 12px;
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.15s;
+        }
+
+        .prompt-clear-btn:hover {
+            background: #5a2d2d;
+            border-color: #f44747;
+            color: #f44747;
+        }
+
+        .prompt-auto-submit {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #9d9d9d;
+            cursor: pointer;
+        }
+
+        .prompt-auto-submit input[type="checkbox"] {
+            accent-color: #0e639c;
+            cursor: pointer;
+        }
+
+        .prompt-empty {
+            color: #6d6d6d;
+            font-size: 11px;
+            font-style: italic;
+            text-align: center;
+            padding: 24px 12px;
+        }
+
+        .prompt-char-count {
+            font-size: 10px;
+            color: #6d6d6d;
+            text-align: right;
+            padding: 0 8px;
+        }
+
+        .prompt-copied-toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #6a9955;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .prompt-copied-toast.visible {
+            opacity: 1;
+        }
+
         /* Update Available Indicator */
         .update-indicator {
             display: none;
@@ -503,9 +751,177 @@
             background: #3c3c3c;
             cursor: not-allowed;
         }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #1e1e1e;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease-out;
+        }
+
+        .loading-overlay.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .loading-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            max-width: 600px;
+            padding: 0 24px;
+        }
+
+        .loading-title {
+            font-size: 48px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #4fc3f7, #7c4dff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+
+        .loading-subtitle {
+            font-size: 14px;
+            color: #808080;
+            margin-bottom: 48px;
+        }
+
+        .loading-trivia {
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 48px;
+        }
+
+        .loading-trivia-text {
+            font-size: 15px;
+            color: #b0b0b0;
+            line-height: 1.6;
+            font-style: italic;
+            transition: opacity 0.4s ease;
+        }
+
+        .loading-progress {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 320px;
+            margin: 0 auto;
+        }
+
+        .loading-step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: #555;
+            transition: color 0.3s ease;
+        }
+
+        .loading-step.active {
+            color: #b0b0b0;
+        }
+
+        .loading-step.done {
+            color: #6a9955;
+        }
+
+        .loading-step-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid #3c3c3c;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .loading-step.active .loading-step-icon {
+            border-color: #4fc3f7;
+            box-shadow: 0 0 8px rgba(79, 195, 247, 0.3);
+        }
+
+        .loading-step.active .loading-step-icon::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4fc3f7;
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+
+        .loading-step.done .loading-step-icon {
+            border-color: #6a9955;
+            background: #6a9955;
+        }
+
+        .loading-step.done .loading-step-icon::after {
+            content: '\2713';
+            font-size: 10px;
+            color: #fff;
+            line-height: 1;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.6); }
+        }
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <canvas class="loading-canvas" id="loading-canvas"></canvas>
+        <div class="loading-content">
+            <div class="loading-title">Frank</div>
+            <div class="loading-subtitle">Preparing your environment</div>
+            <div class="loading-trivia">
+                <div class="loading-trivia-text" id="trivia-text"></div>
+            </div>
+            <div class="loading-progress">
+                <div class="loading-step active" id="step-workspace">
+                    <span class="loading-step-icon"></span>
+                    <span>Setting up workspace...</span>
+                </div>
+                <div class="loading-step" id="step-plugins">
+                    <span class="loading-step-icon"></span>
+                    <span>Installing plugins...</span>
+                </div>
+                <div class="loading-step" id="step-terminals">
+                    <span class="loading-step-icon"></span>
+                    <span>Starting terminals...</span>
+                </div>
+                <div class="loading-step" id="step-ready">
+                    <span class="loading-step-icon"></span>
+                    <span>Almost ready...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>Frank</h1>
         <div class="tabs">
@@ -550,7 +966,10 @@
                     <span class="context-status-indicator" id="status-indicator"></span>
                     <span id="status-text">Connected</span>
                 </div>
-                <span class="context-model-badge" id="model-name">-</span>
+                <div class="context-view-toggle">
+                    <button class="context-view-btn active" data-panel="stats" title="Session Stats">Stats</button>
+                    <button class="context-view-btn" data-panel="prompt" title="Prompt Builder">Prompt</button>
+                </div>
             </div>
             <div class="context-panel-content">
                 <!-- Context Usage Section -->
@@ -637,7 +1056,32 @@
                     View Analytics Dashboard
                 </a>
             </div>
+
+            <!-- Prompt Builder Panel -->
+            <div class="prompt-builder" id="prompt-builder">
+                <div class="prompt-builder-items" id="prompt-items">
+                    <div class="prompt-empty" id="prompt-empty">
+                        Click "+ Add Item" to start building your prompt
+                    </div>
+                </div>
+                <div class="prompt-char-count" id="prompt-char-count"></div>
+                <div class="prompt-builder-actions">
+                    <button class="prompt-add-btn" id="prompt-add-btn">+ Add Item</button>
+                    <div class="action-row">
+                        <button class="prompt-send-btn" id="prompt-paste-btn" disabled>Send to Claude</button>
+                        <button class="prompt-clear-btn" id="prompt-copy-btn" title="Copy to clipboard">Copy</button>
+                        <button class="prompt-clear-btn" id="prompt-clear-btn" title="Clear all items">Clear</button>
+                    </div>
+                    <label class="prompt-auto-submit" title="Press Enter after pasting to auto-submit">
+                        <input type="checkbox" id="prompt-auto-submit" checked>
+                        <span>Auto-submit after sending</span>
+                    </label>
+                </div>
+            </div>
         </div>
+
+        <!-- Toast notification -->
+        <div class="prompt-copied-toast" id="prompt-toast">Copied to clipboard!</div>
     </div>
 
     <script>
@@ -1044,6 +1488,280 @@
             }
         });
 
+        // Context Panel View Toggle (Stats vs Prompt Builder)
+        const contextPanelContent = document.querySelector('.context-panel-content');
+        const promptBuilder = document.getElementById('prompt-builder');
+
+        document.querySelectorAll('.context-view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.context-view-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                const panel = btn.dataset.panel;
+                if (panel === 'prompt') {
+                    contextPanelContent.style.display = 'none';
+                    promptBuilder.classList.add('visible');
+                } else {
+                    contextPanelContent.style.display = '';
+                    promptBuilder.classList.remove('visible');
+                }
+
+                prefs.contextPanel = panel;
+                savePreferences(prefs);
+            });
+        });
+
+        // Restore saved context panel view
+        if (prefs.contextPanel === 'prompt') {
+            const promptBtn = document.querySelector('.context-view-btn[data-panel="prompt"]');
+            if (promptBtn) {
+                document.querySelectorAll('.context-view-btn').forEach(b => b.classList.remove('active'));
+                promptBtn.classList.add('active');
+                contextPanelContent.style.display = 'none';
+                promptBuilder.classList.add('visible');
+            }
+        }
+
+        // Prompt Builder Logic
+        const PROMPT_STORAGE_KEY = 'frank-prompt-items';
+        let promptItems = [];
+
+        function loadPromptItems() {
+            try {
+                const saved = localStorage.getItem(PROMPT_STORAGE_KEY);
+                if (saved) {
+                    promptItems = JSON.parse(saved);
+                }
+            } catch (e) {
+                console.warn('Failed to load prompt items:', e);
+                promptItems = [];
+            }
+        }
+
+        function savePromptItems() {
+            try {
+                localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(promptItems));
+            } catch (e) {
+                console.warn('Failed to save prompt items:', e);
+            }
+        }
+
+        function renderPromptItems() {
+            const container = document.getElementById('prompt-items');
+            const emptyMsg = document.getElementById('prompt-empty');
+            const pasteBtn = document.getElementById('prompt-paste-btn');
+            const charCount = document.getElementById('prompt-char-count');
+
+            if (promptItems.length === 0) {
+                container.innerHTML = '';
+                container.appendChild(emptyMsg);
+                emptyMsg.style.display = '';
+                pasteBtn.disabled = true;
+                charCount.textContent = '';
+                return;
+            }
+
+            emptyMsg.style.display = 'none';
+            container.innerHTML = '';
+
+            promptItems.forEach((item, index) => {
+                const el = document.createElement('div');
+                el.className = 'prompt-item';
+                el.dataset.index = index;
+
+                const header = document.createElement('div');
+                header.className = 'prompt-item-header';
+
+                const label = document.createElement('span');
+                label.className = 'prompt-item-label';
+                label.textContent = '#' + (index + 1);
+
+                const moveUp = document.createElement('button');
+                moveUp.className = 'prompt-item-btn';
+                moveUp.innerHTML = '&#x25B2;';
+                moveUp.title = 'Move up';
+                moveUp.disabled = index === 0;
+                moveUp.addEventListener('click', () => movePromptItem(index, -1));
+
+                const moveDown = document.createElement('button');
+                moveDown.className = 'prompt-item-btn';
+                moveDown.innerHTML = '&#x25BC;';
+                moveDown.title = 'Move down';
+                moveDown.disabled = index === promptItems.length - 1;
+                moveDown.addEventListener('click', () => movePromptItem(index, 1));
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'prompt-item-btn delete';
+                deleteBtn.innerHTML = '&#x2715;';
+                deleteBtn.title = 'Remove';
+                deleteBtn.addEventListener('click', () => removePromptItem(index));
+
+                header.appendChild(label);
+                header.appendChild(moveUp);
+                header.appendChild(moveDown);
+                header.appendChild(deleteBtn);
+
+                const textarea = document.createElement('textarea');
+                textarea.value = item.text;
+                textarea.placeholder = 'Enter prompt text...';
+                textarea.addEventListener('input', (e) => {
+                    promptItems[index].text = e.target.value;
+                    savePromptItems();
+                    updatePromptCharCount();
+                });
+                // Auto-resize textarea
+                textarea.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.max(48, this.scrollHeight) + 'px';
+                });
+
+                el.appendChild(header);
+                el.appendChild(textarea);
+                container.appendChild(el);
+
+                // Trigger initial auto-resize
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.max(48, textarea.scrollHeight) + 'px';
+            });
+
+            pasteBtn.disabled = !promptItems.some(item => item.text.trim());
+            updatePromptCharCount();
+        }
+
+        function updatePromptCharCount() {
+            const charCount = document.getElementById('prompt-char-count');
+            const total = promptItems.reduce((sum, item) => sum + item.text.length, 0);
+            if (total > 0) {
+                charCount.textContent = total.toLocaleString() + ' chars';
+            } else {
+                charCount.textContent = '';
+            }
+        }
+
+        function addPromptItem() {
+            promptItems.push({ text: '' });
+            savePromptItems();
+            renderPromptItems();
+
+            // Focus the new textarea
+            const textareas = document.querySelectorAll('.prompt-item textarea');
+            if (textareas.length > 0) {
+                textareas[textareas.length - 1].focus();
+            }
+
+            // Scroll to bottom
+            const container = document.getElementById('prompt-items');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function removePromptItem(index) {
+            promptItems.splice(index, 1);
+            savePromptItems();
+            renderPromptItems();
+        }
+
+        function movePromptItem(index, direction) {
+            const newIndex = index + direction;
+            if (newIndex < 0 || newIndex >= promptItems.length) return;
+
+            const temp = promptItems[index];
+            promptItems[index] = promptItems[newIndex];
+            promptItems[newIndex] = temp;
+            savePromptItems();
+            renderPromptItems();
+        }
+
+        function clearPromptItems() {
+            if (promptItems.length === 0) return;
+            if (!confirm('Clear all prompt items?')) return;
+            promptItems = [];
+            savePromptItems();
+            renderPromptItems();
+        }
+
+        function getCombinedPrompt() {
+            return promptItems
+                .map(item => item.text.trim())
+                .filter(text => text.length > 0)
+                .join('\n\n');
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('prompt-toast');
+            toast.textContent = message;
+            toast.classList.add('visible');
+            setTimeout(() => toast.classList.remove('visible'), 2000);
+        }
+
+        function copyPromptToClipboard() {
+            const combined = getCombinedPrompt();
+            if (!combined) return;
+
+            navigator.clipboard.writeText(combined).then(() => {
+                showToast('Copied to clipboard!');
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                const temp = document.createElement('textarea');
+                temp.value = combined;
+                document.body.appendChild(temp);
+                temp.select();
+                document.execCommand('copy');
+                document.body.removeChild(temp);
+                showToast('Copied to clipboard!');
+            });
+        }
+
+        async function sendPromptToClaude() {
+            const combined = getCombinedPrompt();
+            if (!combined) return;
+
+            const pasteBtn = document.getElementById('prompt-paste-btn');
+            const autoSubmit = document.getElementById('prompt-auto-submit').checked;
+
+            pasteBtn.disabled = true;
+            pasteBtn.textContent = 'Sending...';
+
+            try {
+                const sendUrl = STATUS_URL.replace('/status', '/status/send-prompt');
+                const response = await fetch(sendUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: combined,
+                        autoSubmit: autoSubmit,
+                        session: 'frank-claude',
+                    }),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
+                    } else {
+                        showToast('Failed to send: ' + (data.message || 'Unknown error'));
+                    }
+                } else {
+                    showToast('Failed to send (server error)');
+                }
+            } catch (e) {
+                console.error('Send failed:', e);
+                showToast('Failed to send - is the server running?');
+            } finally {
+                pasteBtn.disabled = !promptItems.some(item => item.text.trim());
+                pasteBtn.textContent = 'Send to Claude';
+            }
+        }
+
+        // Wire up prompt builder buttons
+        document.getElementById('prompt-add-btn').addEventListener('click', addPromptItem);
+        document.getElementById('prompt-paste-btn').addEventListener('click', sendPromptToClaude);
+        document.getElementById('prompt-copy-btn').addEventListener('click', copyPromptToClipboard);
+        document.getElementById('prompt-clear-btn').addEventListener('click', clearPromptItems);
+
+        // Initialize prompt builder
+        loadPromptItems();
+        renderPromptItems();
+
         // Feedback handling
         const feedbackButtons = document.getElementById('feedback-buttons');
         const feedbackSent = document.getElementById('feedback-sent');
@@ -1087,6 +1805,246 @@
                 }
             });
         });
+        // =============================================
+        // Loading Overlay - Neural Network Animation
+        // =============================================
+        (function() {
+            const overlay = document.getElementById('loading-overlay');
+            if (!overlay) return;
+
+            const canvas = document.getElementById('loading-canvas');
+            const ctx = canvas.getContext('2d');
+            let animationId = null;
+
+            // AI Trivia
+            const trivia = [
+                "GPT-3 has 175 billion parameters \u2014 roughly 1,000\u00d7 more than GPT-2.",
+                "The term 'artificial intelligence' was coined at a Dartmouth workshop in 1956.",
+                "Claude was named after Claude Shannon, the father of information theory.",
+                "The first neural network, the Perceptron, was built in 1958 using physical hardware.",
+                "A single Google search uses about the same energy as turning on a light for 17 seconds.",
+                "The Turing Test was proposed by Alan Turing in 1950 to measure machine intelligence.",
+                "Deep Blue defeated world chess champion Garry Kasparov in 1997.",
+                "The ImageNet dataset that sparked the deep learning revolution contains 14 million images.",
+                "AlphaGo defeated world Go champion Lee Sedol in 2016 with a move no human had ever played.",
+                "The transformer architecture behind modern LLMs was introduced in the 2017 paper 'Attention Is All You Need'.",
+                "ELIZA, created in 1966, was one of the first chatbots and mimicked a therapist.",
+                "The human brain has roughly 86 billion neurons connected by 100 trillion synapses.",
+                "Backpropagation, the algorithm that trains neural networks, was popularized in 1986.",
+                "The word 'robot' comes from the Czech word 'robota', meaning forced labor.",
+                "Geoffrey Hinton, Yann LeCun, and Yoshua Bengio are known as the 'Godfathers of Deep Learning'.",
+                "GPUs were originally designed for gaming but became essential for training AI models.",
+                "The MNIST handwritten digit dataset has been the 'Hello World' of machine learning since 1998.",
+                "Reinforcement learning from human feedback (RLHF) helps align AI outputs with human preferences.",
+                "The concept of 'attention' in transformers lets models focus on relevant parts of their input.",
+                "Neural networks are loosely inspired by biological neurons but work very differently.",
+                "Moore's Law predicted transistor density doubling every ~2 years, enabling modern AI hardware.",
+                "The first AI winter lasted from 1974 to 1980 when funding dried up due to unmet expectations.",
+                "Word2Vec showed that word relationships could be captured as vector arithmetic: king \u2212 man + woman \u2248 queen.",
+                "Generative adversarial networks (GANs) use two competing neural networks to create realistic outputs.",
+                "The bitter lesson by Rich Sutton: general methods leveraging computation beat specialized approaches.",
+                "Claude Shannon's 1948 paper 'A Mathematical Theory of Communication' founded information theory.",
+                "Tokenizers break text into subword pieces \u2014 'unhappiness' might become 'un', 'happiness'.",
+                "The context window of an LLM determines how much text it can consider at once.",
+                "Batch normalization, introduced in 2015, made training deep networks significantly easier.",
+                "The term 'hallucination' in AI refers to confident but factually incorrect outputs."
+            ];
+
+            // Shuffle trivia
+            for (let i = trivia.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [trivia[i], trivia[j]] = [trivia[j], trivia[i]];
+            }
+
+            let triviaIndex = 0;
+            const triviaEl = document.getElementById('trivia-text');
+            triviaEl.textContent = trivia[0];
+
+            const triviaInterval = setInterval(() => {
+                triviaEl.style.opacity = '0';
+                setTimeout(() => {
+                    triviaIndex = (triviaIndex + 1) % trivia.length;
+                    triviaEl.textContent = trivia[triviaIndex];
+                    triviaEl.style.opacity = '1';
+                }, 400);
+            }, 5000);
+
+            // Canvas setup
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Particles / nodes
+            const nodes = [];
+            const nodeCount = Math.min(60, Math.floor(window.innerWidth * window.innerHeight / 15000));
+            const connectionDist = 150;
+
+            for (let i = 0; i < nodeCount; i++) {
+                nodes.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    vx: (Math.random() - 0.5) * 0.5,
+                    vy: (Math.random() - 0.5) * 0.5,
+                    radius: Math.random() * 2 + 1,
+                    pulse: Math.random() * Math.PI * 2,
+                    pulseSpeed: Math.random() * 0.02 + 0.01
+                });
+            }
+
+            function drawNetwork() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Update and draw connections
+                for (let i = 0; i < nodes.length; i++) {
+                    const a = nodes[i];
+                    a.x += a.vx;
+                    a.y += a.vy;
+                    a.pulse += a.pulseSpeed;
+
+                    // Wrap around edges
+                    if (a.x < 0) a.x = canvas.width;
+                    if (a.x > canvas.width) a.x = 0;
+                    if (a.y < 0) a.y = canvas.height;
+                    if (a.y > canvas.height) a.y = 0;
+
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        const b = nodes[j];
+                        const dx = a.x - b.x;
+                        const dy = a.y - b.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < connectionDist) {
+                            const alpha = (1 - dist / connectionDist) * 0.15;
+                            ctx.beginPath();
+                            ctx.moveTo(a.x, a.y);
+                            ctx.lineTo(b.x, b.y);
+                            ctx.strokeStyle = `rgba(124, 77, 255, ${alpha})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                // Draw nodes
+                for (const node of nodes) {
+                    const glow = Math.sin(node.pulse) * 0.3 + 0.7;
+                    const r = node.radius * glow;
+
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(79, 195, 247, ${glow * 0.6})`;
+                    ctx.fill();
+
+                    // Subtle outer glow
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, r * 2.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(79, 195, 247, ${glow * 0.08})`;
+                    ctx.fill();
+                }
+
+                animationId = requestAnimationFrame(drawNetwork);
+            }
+
+            drawNetwork();
+
+            // Progress tracking
+            const steps = ['step-workspace', 'step-plugins', 'step-terminals', 'step-ready'];
+            let currentStep = 0;
+
+            function setStep(index) {
+                for (let i = 0; i < steps.length; i++) {
+                    const el = document.getElementById(steps[i]);
+                    el.classList.remove('active', 'done');
+                    if (i < index) el.classList.add('done');
+                    else if (i === index) el.classList.add('active');
+                }
+                currentStep = index;
+            }
+
+            // Readiness detection: poll status + check terminal iframes
+            let terminalsReady = false;
+            let statusReady = false;
+
+            async function checkDetailedStatus() {
+                try {
+                    const detailedUrl = STATUS_URL.replace('/status', '/status/detailed');
+                    const response = await fetch(detailedUrl, { signal: AbortSignal.timeout(3000) });
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Status server is responding
+                        if (currentStep < 1) setStep(1);
+
+                        // Check if Claude process is connected
+                        if (data.connected !== false) {
+                            statusReady = true;
+                            if (currentStep < 2) setStep(2);
+                        }
+                        return data;
+                    }
+                } catch (e) {
+                    // Status not ready yet
+                }
+                return null;
+            }
+
+            async function checkTerminals() {
+                const claudeFrame = document.getElementById('claude-frame');
+                const bashFrame = document.getElementById('bash-frame');
+
+                try {
+                    // Try fetching the terminal URLs to see if they respond
+                    const results = await Promise.allSettled([
+                        fetch(claudeFrame.src, { mode: 'no-cors', signal: AbortSignal.timeout(3000) }),
+                        fetch(bashFrame.src, { mode: 'no-cors', signal: AbortSignal.timeout(3000) })
+                    ]);
+
+                    // With no-cors, a successful response (even opaque) means the server is up
+                    const allOk = results.every(r => r.status === 'fulfilled');
+                    if (allOk) {
+                        terminalsReady = true;
+                    }
+                } catch (e) {
+                    // Terminals not ready
+                }
+            }
+
+            function dismissOverlay() {
+                clearInterval(triviaInterval);
+                clearInterval(readinessInterval);
+
+                setStep(3); // "Almost ready..." -> done
+                setTimeout(() => {
+                    // Mark final step done
+                    document.getElementById(steps[3]).classList.remove('active');
+                    document.getElementById(steps[3]).classList.add('done');
+
+                    setTimeout(() => {
+                        overlay.classList.add('fade-out');
+                        setTimeout(() => {
+                            overlay.remove();
+                            if (animationId) cancelAnimationFrame(animationId);
+                            window.removeEventListener('resize', resizeCanvas);
+                        }, 500);
+                    }, 300);
+                }, 400);
+            }
+
+            const readinessInterval = setInterval(async () => {
+                await checkDetailedStatus();
+                await checkTerminals();
+
+                if (statusReady && terminalsReady) {
+                    dismissOverlay();
+                }
+            }, 2000);
+
+            // Initial check
+            checkDetailedStatus();
+            checkTerminals();
+        })();
     </script>
 </body>
 </html>
