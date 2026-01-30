@@ -69,6 +69,22 @@
             color: #cccccc;
         }
 
+        .profile-badge {
+            display: none;
+            padding: 3px 10px;
+            background: #0e639c;
+            color: #ffffff;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: 'Consolas', 'Monaco', monospace;
+            letter-spacing: 0.3px;
+        }
+
+        .profile-badge.visible {
+            display: inline-block;
+        }
+
         .tabs {
             display: flex;
             gap: 4px;
@@ -1092,6 +1108,7 @@
 
     <div class="header">
         <h1>Frank</h1>
+        <span class="profile-badge" id="profile-badge"></span>
         <div class="tabs">
             <button class="tab active" data-view="split">Split View</button>
             <button class="tab" data-view="claude-only">Claude Only</button>
@@ -1302,6 +1319,17 @@
             }
             console.log('Claude URL:', claudeFrame.src);
             console.log('Bash URL:', bashFrame.src);
+
+            // Show profile badge
+            const profileBadge = document.getElementById('profile-badge');
+            const badgeParts = window.location.pathname.split('/').filter(Boolean);
+            const badgePrefix = badgeParts[0] || '';
+            const badgeStatic = ['claude', 'bash', 'status', 'health', 'api', 'dashboard', '_t', '_b'];
+            if (badgePrefix && !badgeStatic.includes(badgePrefix)) {
+                profileBadge.textContent = badgePrefix;
+                profileBadge.classList.add('visible');
+                document.title = `Frank - ${badgePrefix}`;
+            }
         })();
 
         // Storage key for preferences (shared across all instances)
