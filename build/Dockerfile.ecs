@@ -116,6 +116,10 @@ RUN sed -i 's/\r$//' /root/.tmux.conf
 COPY build/tmux-session.sh /usr/local/bin/tmux-session.sh
 RUN chmod +x /usr/local/bin/tmux-session.sh
 
+# Copy credential sync script (shares OAuth tokens across containers)
+COPY build/credential-sync.sh /usr/local/bin/credential-sync.sh
+RUN chmod +x /usr/local/bin/credential-sync.sh
+
 # Copy ECS-specific entrypoint
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

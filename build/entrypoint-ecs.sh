@@ -76,6 +76,9 @@ else
     echo "WARNING: CLAUDE_CREDENTIALS not set - Claude auth may fail"
 fi
 
+# Start credential sync (shares OAuth tokens across containers via Secrets Manager)
+/usr/local/bin/credential-sync.sh &
+
 # Setup GitHub token (injected by Copilot secrets)
 if [ -n "$GITHUB_TOKEN" ]; then
     echo "Configuring GitHub token..."
