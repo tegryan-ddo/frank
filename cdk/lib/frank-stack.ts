@@ -379,11 +379,19 @@ export class FrankStack extends cdk.Stack {
       : elbv2.ListenerAction.forward([bashTargetGroup]);
 
     // Add listener rules
+    // Health endpoint - no auth, routes to dedicated health server (port 7683)
+    httpsListener.addAction('HealthRule', {
+      priority: 9,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/health'])],
+      action: elbv2.ListenerAction.forward([statusTargetGroup]),
+    });
+
     // Status endpoint - no auth required (for context panel API calls)
+    // Routes to the web server (port 7680) which serves /status and /status/detailed
     httpsListener.addAction('StatusRule', {
       priority: 10,
-      conditions: [elbv2.ListenerCondition.pathPatterns(['/status', '/status/*', '/health'])],
-      action: elbv2.ListenerAction.forward([statusTargetGroup]),
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/status', '/status/*'])],
+      action: elbv2.ListenerAction.forward([webTargetGroup]),
     });
 
     // Claude terminal - with Cognito auth
