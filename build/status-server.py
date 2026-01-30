@@ -253,6 +253,60 @@ CONTEXT_WINDOWS = {
     'haiku': 200000,
 }
 
+def send_to_tmux(text, session='frank-claude', auto_submit=False):
+    """Send text to a tmux session using load-buffer/paste-buffer for safety."""
+    import subprocess
+    import tempfile
+
+    try:
+        # Write text to a temp file (handles special chars and multi-line safely)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(text)
+            tmp_path = f.name
+
+        # Load into tmux paste buffer
+        result = subprocess.run(
+            ['tmux', 'load-buffer', tmp_path],
+            capture_output=True, text=True, timeout=5
+        )
+        os.unlink(tmp_path)
+
+        if result.returncode != 0:
+            log(f"tmux load-buffer failed: {result.stderr}")
+            return False
+
+        # Paste buffer into the target session
+        result = subprocess.run(
+            ['tmux', 'paste-buffer', '-t', session],
+            capture_output=True, text=True, timeout=5
+        )
+
+        if result.returncode != 0:
+            log(f"tmux paste-buffer failed: {result.stderr}")
+            return False
+
+        # Optionally press Enter to submit
+        if auto_submit:
+            result = subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'Enter'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0:
+                log(f"tmux send-keys Enter failed: {result.stderr}")
+
+        log(f"Sent {len(text)} chars to tmux session '{session}' (auto_submit={auto_submit})")
+        return True
+
+    except Exception as e:
+        log(f"Error sending to tmux: {e}")
+        # Clean up temp file on error
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
+        return False
+
+
 class StatusHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # Suppress logging
@@ -354,9 +408,58 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'error': str(e)}).encode())
 
     def do_POST(self):
-        """Handle POST requests for feedback."""
+        """Handle POST requests for feedback and prompt sending."""
         try:
-            if self.path == '/status/feedback':
+            path = self.path.split('?')[0]
+            if URL_PREFIX and path.startswith(URL_PREFIX):
+                path = path[len(URL_PREFIX):] or '/'
+
+            if path == '/status/send-prompt':
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+
+                try:
+                    data = json.loads(body)
+                    text = data.get('text', '')
+                    auto_submit = data.get('autoSubmit', False)
+                    session = data.get('session', 'frank-claude')
+
+                    if not text:
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'error': 'No text provided'}).encode())
+                        return
+
+                    # Validate session name (only allow known sessions)
+                    if session not in ('frank-claude', 'frank-bash'):
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'error': 'Invalid session'}).encode())
+                        return
+
+                    success = send_to_tmux(text, session, auto_submit)
+
+                    self.send_response(200 if success else 500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': success,
+                        'message': 'Prompt sent to terminal' if success else 'Failed to send prompt'
+                    }).encode())
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode())
+                return
+
+            elif path == '/status/feedback':
                 # Read request body
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length).decode('utf-8')
