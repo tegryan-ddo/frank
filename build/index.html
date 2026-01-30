@@ -1553,8 +1553,12 @@
             const charCount = document.getElementById('prompt-char-count');
 
             if (promptItems.length === 0) {
-                container.innerHTML = '';
-                container.appendChild(emptyMsg);
+                // Clear items but keep emptyMsg
+                Array.from(container.children).forEach(child => {
+                    if (child !== emptyMsg) {
+                        container.removeChild(child);
+                    }
+                });
                 emptyMsg.style.display = '';
                 pasteBtn.disabled = true;
                 charCount.textContent = '';
@@ -1562,7 +1566,12 @@
             }
 
             emptyMsg.style.display = 'none';
-            container.innerHTML = '';
+            // Clear items but keep emptyMsg
+            Array.from(container.children).forEach(child => {
+                if (child !== emptyMsg) {
+                    container.removeChild(child);
+                }
+            });
 
             promptItems.forEach((item, index) => {
                 const el = document.createElement('div');
