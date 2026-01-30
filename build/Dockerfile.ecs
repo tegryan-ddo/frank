@@ -1,6 +1,6 @@
 # Frank ECS Container
 # Optimized for AWS ECS with Secrets Manager and EFS
-FROM debian:bookworm-slim
+FROM public.ecr.aws/debian/debian:bookworm-slim
 
 LABEL maintainer="frank-cli"
 LABEL description="Frank ECS container with Claude Code"
