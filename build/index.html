@@ -563,6 +563,26 @@
             color: #f44747;
         }
 
+        .prompt-item-btn.pin {
+            font-size: 11px;
+        }
+
+        .prompt-item-btn.pin.pinned {
+            color: #dcdcaa;
+        }
+
+        .prompt-item-btn.pin.pinned:hover {
+            color: #ffffff;
+        }
+
+        .prompt-item.pinned {
+            border-color: #4d4d2d;
+        }
+
+        .prompt-item.pinned:focus-within {
+            border-color: #0e639c;
+        }
+
         .prompt-item textarea {
             width: 100%;
             min-height: 48px;
@@ -1575,7 +1595,7 @@
 
             promptItems.forEach((item, index) => {
                 const el = document.createElement('div');
-                el.className = 'prompt-item';
+                el.className = 'prompt-item' + (item.pinned ? ' pinned' : '');
                 el.dataset.index = index;
 
                 const header = document.createElement('div');
@@ -1599,6 +1619,13 @@
                 moveDown.disabled = index === promptItems.length - 1;
                 moveDown.addEventListener('click', () => movePromptItem(index, 1));
 
+                const pinBtn = document.createElement('button');
+                pinBtn.className = 'prompt-item-btn pin' + (item.pinned ? ' pinned' : '');
+                pinBtn.innerHTML = item.pinned ? '&#x1F4CC;' : '&#x1F4CC;';
+                pinBtn.title = item.pinned ? 'Unpin (will persist after send)' : 'Pin (keep after send)';
+                pinBtn.style.opacity = item.pinned ? '1' : '0.4';
+                pinBtn.addEventListener('click', () => togglePinPromptItem(index));
+
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'prompt-item-btn delete';
                 deleteBtn.innerHTML = '&#x2715;';
@@ -1608,6 +1635,7 @@
                 header.appendChild(label);
                 header.appendChild(moveUp);
                 header.appendChild(moveDown);
+                header.appendChild(pinBtn);
                 header.appendChild(deleteBtn);
 
                 const textarea = document.createElement('textarea');
@@ -1633,7 +1661,7 @@
                 textarea.style.height = Math.max(48, textarea.scrollHeight) + 'px';
             });
 
-            pasteBtn.disabled = !promptItems.some(item => item.text.trim());
+            pasteBtn.disabled = promptItems.filter(item => item.text.trim()).length < 2;
             updatePromptCharCount();
         }
 
@@ -1648,7 +1676,7 @@
         }
 
         function addPromptItem() {
-            promptItems.push({ text: '' });
+            promptItems.push({ text: '', pinned: false });
             savePromptItems();
             renderPromptItems();
 
@@ -1665,6 +1693,12 @@
 
         function removePromptItem(index) {
             promptItems.splice(index, 1);
+            savePromptItems();
+            renderPromptItems();
+        }
+
+        function togglePinPromptItem(index) {
+            promptItems[index].pinned = !promptItems[index].pinned;
             savePromptItems();
             renderPromptItems();
         }
@@ -1749,6 +1783,10 @@
                     console.log('Response data:', data);
                     if (data.success) {
                         showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
+                        // Remove unpinned items, keep pinned ones
+                        promptItems = promptItems.filter(item => item.pinned);
+                        savePromptItems();
+                        renderPromptItems();
                     } else {
                         showToast('Failed: ' + (data.message || data.error || 'Unknown error'));
                     }
@@ -1761,7 +1799,7 @@
                 console.error('Send failed:', e);
                 showToast('Network error: ' + e.message);
             } finally {
-                pasteBtn.disabled = !promptItems.some(item => item.text.trim());
+                pasteBtn.disabled = promptItems.filter(item => item.text.trim()).length < 2;
                 pasteBtn.textContent = 'Send to Claude';
             }
         }
