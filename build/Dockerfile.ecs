@@ -84,7 +84,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Install Claude Code CLI (native installer requires bash)
 # The installer puts claude in ~/.local/bin/
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && mv /root/.local/bin/claude /usr/local/bin/claude
+    && mv /root/.local/bin/claude /usr/local/bin/claude \
+    && ln -s /usr/local/bin/claude /root/.local/bin/claude
 
 # Create directories (running as root for volume mount compatibility)
 RUN mkdir -p /root/.config/claude-code \
