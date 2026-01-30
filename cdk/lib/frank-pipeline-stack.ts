@@ -11,6 +11,7 @@ class FrankStage extends cdk.Stage {
     super(scope, id, props);
 
     new FrankStack(this, 'FrankStack', {
+      stackName: 'FrankStack',
       ...props.frankProps,
     });
   }
