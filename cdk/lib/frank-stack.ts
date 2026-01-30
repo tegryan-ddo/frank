@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
-import * as efs from 'aws-cdk-lib/aws-efs';
+
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as elbv2Actions from 'aws-cdk-lib/aws-elasticloadbalancingv2-actions';
 import * as elbv2Targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
@@ -59,30 +59,6 @@ export class FrankStack extends cdk.Stack {
       containerInsights: true,
     });
 
-    // EFS File System for persistent workspace storage
-    const fileSystem = new efs.FileSystem(this, 'FrankEfs', {
-      vpc,
-      lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
-      performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
-      throughputMode: efs.ThroughputMode.BURSTING,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      encrypted: true,
-    });
-
-    // EFS Access Point
-    const accessPoint = fileSystem.addAccessPoint('FrankAccessPoint', {
-      path: '/workspace',
-      posixUser: {
-        uid: '1000',
-        gid: '1000',
-      },
-      createAcl: {
-        ownerUid: '1000',
-        ownerGid: '1000',
-        permissions: '755',
-      },
-    });
-
     // Secrets - stored in Secrets Manager
     const githubTokenSecret = new secretsmanager.Secret(this, 'GitHubToken', {
       secretName: '/frank/github-token',
@@ -137,28 +113,12 @@ export class FrankStack extends cdk.Stack {
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FrankTask', {
       memoryLimitMiB: 8192,
       cpu: 4096,
+      ephemeralStorageGiB: 50,
       runtimePlatform: {
         cpuArchitecture: ecs.CpuArchitecture.X86_64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
       },
     });
-
-    // Add EFS volume to task
-    taskDefinition.addVolume({
-      name: 'workspace',
-      efsVolumeConfiguration: {
-        fileSystemId: fileSystem.fileSystemId,
-        transitEncryption: 'ENABLED',
-        authorizationConfig: {
-          accessPointId: accessPoint.accessPointId,
-          iam: 'ENABLED',
-        },
-      },
-    });
-
-    // Grant EFS access to task role
-    fileSystem.grantRootAccess(taskDefinition.taskRole);
-    fileSystem.connections.allowDefaultPortFrom(ec2.Peer.ipv4(vpc.vpcCidrBlock));
 
     // Grant S3 analytics bucket write access to task role
     analyticsBucket.grantWrite(taskDefinition.taskRole);
@@ -209,13 +169,6 @@ export class FrankStack extends cdk.Stack {
         retries: 3,
         startPeriod: cdk.Duration.seconds(60),
       },
-    });
-
-    // Mount EFS volume
-    container.addMountPoints({
-      sourceVolume: 'workspace',
-      containerPath: '/workspace',
-      readOnly: false,
     });
 
     // Import certificate
@@ -283,9 +236,6 @@ export class FrankStack extends cdk.Stack {
       ec2.Port.tcp(7683),
       'Allow ALB to reach health check port'
     );
-
-    // Allow EFS access
-    fileSystem.connections.allowFrom(serviceSg, ec2.Port.tcp(2049));
 
     // Fargate Service
     const service = new ecs.FargateService(this, 'FrankService', {
@@ -694,11 +644,6 @@ export class FrankStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ClaudeCredentialsSecretArn', {
       value: claudeCredentialsSecret.secretArn,
       description: 'Claude credentials secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/claude-credentials --secret-string "$(cat ~/.claude/.credentials.json)"',
-    });
-
-    new cdk.CfnOutput(this, 'EfsFileSystemId', {
-      value: fileSystem.fileSystemId,
-      description: 'EFS file system ID for workspace storage',
     });
 
     new cdk.CfnOutput(this, 'AnalyticsBucketName', {
