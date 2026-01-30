@@ -496,6 +496,11 @@ mkdir -p "$WEB_DIR"
 sed "s|CLAUDE_URL|http://localhost:${HOST_CLAUDE_PORT:-8081}|g; s|BASH_URL|http://localhost:${HOST_BASH_PORT:-8082}|g; s|STATUS_ENDPOINT|http://localhost:${HOST_STATUS_PORT:-8083}/status|g" \
     /usr/local/share/frank/index.html > "$WEB_DIR/index.html" 2>/dev/null || true
 
+# Configure tmux directory for session handling
+# Must be set before starting status server so tmux commands work
+export TMUX_TMPDIR=/tmp/tmux-sessions
+mkdir -p "$TMUX_TMPDIR"
+
 # Start combined web+status server (serves static files and status API on WEB_PORT)
 echo "Starting web+status server on port $WEB_PORT..."
 export WEB_DIR="$WEB_DIR"
@@ -536,10 +541,6 @@ else
     CLAUDE_BASE_PATH="/claude"
     BASH_BASE_PATH="/bash"
 fi
-
-# Configure tmux for better session handling
-export TMUX_TMPDIR=/tmp/tmux-sessions
-mkdir -p "$TMUX_TMPDIR"
 
 # Start bash terminal with tmux persistence
 echo "Starting bash terminal on port $BASH_PORT (path: $BASH_BASE_PATH)..."
