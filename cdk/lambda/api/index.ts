@@ -377,7 +377,8 @@ async function ensureListenerRuleWithPriority(
   profileName: string,
   targetGroupArn: string,
   pathPatterns: string[],
-  priority: number
+  priority: number,
+  skipAuth: boolean = false
 ): Promise<void> {
   // Check if rule exists
   const rulesResult = await elbClient.send(
@@ -392,10 +393,10 @@ async function ensureListenerRuleWithPriority(
     }
   }
 
-  // Build actions array - include Cognito auth if configured
+  // Build actions array - include Cognito auth if configured (unless skipAuth)
   const actions: any[] = [];
 
-  if (COGNITO_USER_POOL_ARN && COGNITO_CLIENT_ID && COGNITO_DOMAIN) {
+  if (!skipAuth && COGNITO_USER_POOL_ARN && COGNITO_CLIENT_ID && COGNITO_DOMAIN) {
     // Add Cognito authentication action first (Order: 1)
     actions.push({
       Type: 'authenticate-cognito',
@@ -417,8 +418,10 @@ async function ensureListenerRuleWithPriority(
       TargetGroupArn: targetGroupArn,
     });
   } else {
-    // No Cognito config - just forward (no auth)
-    console.warn('Cognito not configured - creating rule without authentication');
+    // No Cognito config or auth skipped - just forward (no auth)
+    if (!skipAuth) {
+      console.warn('Cognito not configured - creating rule without authentication');
+    }
     actions.push({
       Type: 'forward',
       TargetGroupArn: targetGroupArn,
@@ -477,11 +480,27 @@ async function ensureAllListenerRules(
   profileName: string,
   targetGroups: TargetGroupInfo[]
 ): Promise<void> {
-  // Calculate base priority from hash (100-800 range to leave room for 3 rules)
-  const basePriority = 100 + (hashCode(profileName) % 700);
+  // Calculate base priority from hash (100-800 range to leave room for 4 rules)
+  const basePriority = 100 + (hashCode(profileName) % 696);
+
+  // Find the wrapper target group (port 7680) for the no-auth status rule
+  const wrapperTg = targetGroups.find((tg) => tg.pathSuffix === '');
+
+  // Create a no-auth rule for /{profile}/status endpoints (context panel API calls)
+  // This must have higher priority (lower number) than the wrapper catch-all
+  if (wrapperTg) {
+    await ensureListenerRuleWithPriority(
+      listenerArn,
+      profileName,
+      wrapperTg.arn,
+      [`/${profileName}/status`, `/${profileName}/status/*`],
+      basePriority + 0, // Highest priority
+      true // skipAuth
+    );
+  }
 
   // Create rules in order of specificity (most specific first = lower priority number)
-  // Priority order: _t (Claude terminal) < _b (Bash terminal) < wrapper (catch-all)
+  // Priority order: status (no auth) < _t (Claude terminal) < _b (Bash terminal) < wrapper (catch-all)
   for (let i = 0; i < targetGroups.length; i++) {
     const tg = targetGroups[i];
     let pathPatterns: string[];
@@ -490,15 +509,15 @@ async function ensureAllListenerRules(
     if (tg.pathSuffix === '/_t') {
       // Claude terminal: /{profile}/_t and /{profile}/_t/*
       pathPatterns = [`/${profileName}/_t`, `/${profileName}/_t/*`];
-      priorityOffset = 0; // Highest priority (lowest number)
+      priorityOffset = 1;
     } else if (tg.pathSuffix === '/_b') {
       // Bash terminal: /{profile}/_b and /{profile}/_b/*
       pathPatterns = [`/${profileName}/_b`, `/${profileName}/_b/*`];
-      priorityOffset = 1;
+      priorityOffset = 2;
     } else {
       // Wrapper: /{profile} and /{profile}/* (catch-all, lowest priority)
       pathPatterns = [`/${profileName}`, `/${profileName}/*`];
-      priorityOffset = 2;
+      priorityOffset = 3;
     }
 
     await ensureListenerRuleWithPriority(
