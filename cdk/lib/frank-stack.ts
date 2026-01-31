@@ -126,6 +126,19 @@ export class FrankStack extends cdk.Stack {
     // Grant credential sync write access to Claude credentials secret
     claudeCredentialsSecret.grantWrite(taskDefinition.taskRole);
 
+    // Grant CodePipeline read access to task role
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'codepipeline:GetPipeline',
+        'codepipeline:GetPipelineState',
+        'codepipeline:GetPipelineExecution',
+        'codepipeline:ListPipelines',
+        'codepipeline:ListPipelineExecutions',
+        'codepipeline:ListActionExecutions',
+      ],
+      resources: ['*'],
+    }));
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
