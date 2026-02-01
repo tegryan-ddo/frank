@@ -126,7 +126,7 @@ export class FrankStack extends cdk.Stack {
     // Grant credential sync write access to Claude credentials secret
     claudeCredentialsSecret.grantWrite(taskDefinition.taskRole);
 
-    // Grant CodePipeline read access to task role
+    // Grant CodePipeline access to task role
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: [
         'codepipeline:GetPipeline',
@@ -135,8 +135,27 @@ export class FrankStack extends cdk.Stack {
         'codepipeline:ListPipelines',
         'codepipeline:ListPipelineExecutions',
         'codepipeline:ListActionExecutions',
+        'codepipeline:RetryStageExecution',
       ],
       resources: ['*'],
+    }));
+
+    // Grant CodeBuild update access for managing build projects
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'codebuild:UpdateProject',
+        'codebuild:BatchGetProjects',
+      ],
+      resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/pnyx-*`],
+    }));
+
+    // Grant scoped IAM policy management for pnyx roles
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'iam:PutRolePolicy',
+        'iam:GetRolePolicy',
+      ],
+      resources: [`arn:aws:iam::${this.account}:role/pnyx-*`],
     }));
 
     // Grant ELB read access to task role
