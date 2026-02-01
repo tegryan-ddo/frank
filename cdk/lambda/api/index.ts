@@ -446,13 +446,17 @@ async function ensureListenerRuleWithPriority(
     );
   } catch (error: any) {
     // Handle priority conflict by trying nearby priorities
+    // Try lower numbers first (higher precedence) to avoid being shadowed by catch-all rules
     if (error.name === 'PriorityInUseException') {
-      for (let i = 1; i <= 5; i++) {
+      const offsets = [-1, -2, -3, 1, 2, 3, 4, 5];
+      for (const offset of offsets) {
+        const tryPriority = priority + offset;
+        if (tryPriority < 1) continue; // ALB priorities must be >= 1
         try {
           await elbClient.send(
             new CreateRuleCommand({
               ListenerArn: listenerArn,
-              Priority: priority + i,
+              Priority: tryPriority,
               Conditions: [
                 {
                   Field: 'path-pattern',
@@ -486,36 +490,34 @@ async function ensureAllListenerRules(
   // Find the wrapper target group (port 7680) for the no-auth status rule
   const wrapperTg = targetGroups.find((tg) => tg.pathSuffix === '');
 
-  // Create a no-auth rule for /{profile}/status endpoints (context panel API calls)
-  // This must have higher priority (lower number) than the wrapper catch-all
+  // Create rules in order of specificity (most specific first = lower priority number)
+  // Priority order: status (no auth) < _t (Claude terminal) < _b (Bash terminal) < wrapper (catch-all)
+  // The catch-all MUST be created last so its priority number is highest (lowest precedence)
+
+  // Find the wrapper target group (port 7680) for the no-auth status rule
   if (wrapperTg) {
     await ensureListenerRuleWithPriority(
       listenerArn,
       profileName,
       wrapperTg.arn,
       [`/${profileName}/status`, `/${profileName}/status/*`],
-      basePriority + 0, // Highest priority
+      basePriority + 0, // Highest priority (lowest number)
       true // skipAuth
     );
   }
 
-  // Create rules in order of specificity (most specific first = lower priority number)
-  // Priority order: status (no auth) < _t (Claude terminal) < _b (Bash terminal) < wrapper (catch-all)
   for (let i = 0; i < targetGroups.length; i++) {
     const tg = targetGroups[i];
     let pathPatterns: string[];
     let priorityOffset: number;
 
     if (tg.pathSuffix === '/_t') {
-      // Claude terminal: /{profile}/_t and /{profile}/_t/*
       pathPatterns = [`/${profileName}/_t`, `/${profileName}/_t/*`];
       priorityOffset = 1;
     } else if (tg.pathSuffix === '/_b') {
-      // Bash terminal: /{profile}/_b and /{profile}/_b/*
       pathPatterns = [`/${profileName}/_b`, `/${profileName}/_b/*`];
       priorityOffset = 2;
     } else {
-      // Wrapper: /{profile} and /{profile}/* (catch-all, lowest priority)
       pathPatterns = [`/${profileName}`, `/${profileName}/*`];
       priorityOffset = 3;
     }
