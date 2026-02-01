@@ -139,6 +139,18 @@ export class FrankStack extends cdk.Stack {
       resources: ['*'],
     }));
 
+    // Grant ELB read access to task role
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'elasticloadbalancing:DescribeLoadBalancers',
+        'elasticloadbalancing:DescribeListeners',
+        'elasticloadbalancing:DescribeRules',
+        'elasticloadbalancing:DescribeTargetGroups',
+        'elasticloadbalancing:DescribeTargetHealth',
+      ],
+      resources: ['*'],
+    }));
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
