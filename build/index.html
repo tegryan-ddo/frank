@@ -1159,6 +1159,7 @@
                 <div class="context-panel-header-status">
                     <span class="context-status-indicator" id="status-indicator"></span>
                     <span id="status-text">Connected</span>
+                    <span class="context-model-badge" id="model-name">Sonnet</span>
                 </div>
                 <span style="font-size: 11px; color: #808080;">Stats</span>
             </div>
@@ -1476,10 +1477,9 @@
             }
 
             // Update model
-            if (data.model) {
-                document.getElementById('model-name').textContent = data.model;
-            } else {
-                document.getElementById('model-name').textContent = 'Sonnet';
+            const modelEl = document.getElementById('model-name');
+            if (modelEl) {
+                modelEl.textContent = data.model || 'Sonnet';
             }
 
             // Check if Claude process is running
