@@ -75,6 +75,11 @@ export class FrankStack extends cdk.Stack {
       description: 'Pnyx API key for agent deliberation platform',
     });
 
+    const openaiApiKeySecret = new secretsmanager.Secret(this, 'OpenAiApiKey', {
+      secretName: '/frank/openai-api-key',
+      description: 'OpenAI API key for Codex worker containers',
+    });
+
     // =========================================================================
     // Analytics S3 Bucket
     // =========================================================================
@@ -752,6 +757,65 @@ export class FrankStack extends cdk.Stack {
       description: 'Daily analytics aggregation for Frank prompts',
     });
 
+    // =========================================================================
+    // Codex Worker Task Definition (headless, no ALB/web terminal)
+    // =========================================================================
+    const codexTaskDefinition = new ecs.FargateTaskDefinition(this, 'FrankCodexWorker', {
+      memoryLimitMiB: 2048,
+      cpu: 1024,
+      runtimePlatform: {
+        cpuArchitecture: ecs.CpuArchitecture.X86_64,
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+      },
+    });
+
+    // Codex worker needs the same base permissions as the main task role
+    // for EFS access, CloudWatch logging, and git operations
+    analyticsBucket.grantWrite(codexTaskDefinition.taskRole);
+
+    codexTaskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'elasticfilesystem:ClientMount',
+        'elasticfilesystem:ClientWrite',
+        'elasticfilesystem:ClientRootAccess',
+      ],
+      resources: ['*'],
+    }));
+
+    // Codex worker container
+    // TODO: Use a separate Dockerfile.codex for the Codex worker image
+    const codexContainer = codexTaskDefinition.addContainer('codex-worker', {
+      image: ecs.ContainerImage.fromAsset('..', {
+        file: 'build/Dockerfile.ecs',
+        exclude: ['cdk', 'cdk.out', 'node_modules', '.git'],
+      }),
+      logging: ecs.LogDrivers.awsLogs({
+        logGroup,
+        streamPrefix: 'codex-worker',
+      }),
+      environment: {
+        CONTAINER_NAME: 'codex-worker',
+        GIT_REPO: '',
+        GIT_BRANCH: 'main',
+        TASK_PROMPT: '',
+        CODEX_MODEL: 'codex-mini',
+      },
+      secrets: {
+        OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openaiApiKeySecret),
+        GITHUB_TOKEN: ecs.Secret.fromSecretsManager(githubTokenSecret),
+      },
+      // No port mappings - headless worker, no web UI
+    });
+
+    // Grant Lambda permission to pass Codex task roles for RunTask
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['iam:PassRole'],
+      resources: [
+        codexTaskDefinition.taskRole.roleArn,
+        codexTaskDefinition.executionRole!.roleArn,
+      ],
+    }));
+
     // Outputs
     new cdk.CfnOutput(this, 'ServiceUrl', {
       value: `https://${props.domainName}`,
@@ -786,6 +850,16 @@ export class FrankStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DashboardUrl', {
       value: `https://${props.domainName}/dashboard`,
       description: 'Analytics dashboard URL',
+    });
+
+    new cdk.CfnOutput(this, 'OpenAiApiKeySecretArn', {
+      value: openaiApiKeySecret.secretArn,
+      description: 'OpenAI API key secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/openai-api-key --secret-string "sk-..."',
+    });
+
+    new cdk.CfnOutput(this, 'CodexTaskDefinitionArn', {
+      value: codexTaskDefinition.taskDefinitionArn,
+      description: 'Codex worker task definition ARN for CLI usage',
     });
   }
 }

@@ -85,6 +85,45 @@ var (
 	authPnyxClear bool
 )
 
+var authOpenAICmd = &cobra.Command{
+	Use:   "openai",
+	Short: "Configure OpenAI authentication for Codex workers",
+	Long: `Configure the OpenAI API key for Codex worker containers.
+
+This key is used by headless Codex workers dispatched via 'frank ecs dispatch'
+and 'frank scrum run'. Usage is billed per-token at standard OpenAI API rates.
+
+To get your API key:
+  1. Go to https://platform.openai.com/api-keys
+  2. Click "Create new secret key"
+  3. Copy the key (starts with sk-)
+
+After storing locally, push to AWS with:
+  frank auth push`,
+	RunE: runAuthOpenAI,
+}
+
+var authPushCmd = &cobra.Command{
+	Use:   "push",
+	Short: "Push local credentials to AWS Secrets Manager",
+	Long: `Push locally stored credentials to AWS Secrets Manager for ECS containers.
+
+This syncs your local auth tokens to the secrets that ECS tasks read at startup.
+Only credentials that are configured locally will be pushed.
+
+Secrets updated:
+  /frank/github-token       ← frank auth github
+  /frank/claude-credentials ← ~/.claude/.credentials.json
+  /frank/pnyx-api-key       ← frank auth pnyx
+  /frank/openai-api-key     ← frank auth openai`,
+	RunE: runAuthPush,
+}
+
+var (
+	authOpenAIToken string
+	authOpenAIClear bool
+)
+
 var authAWSCmd = &cobra.Command{
 	Use:   "aws [profile]",
 	Short: "Generate temporary AWS credentials",
@@ -125,6 +164,8 @@ func init() {
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authAWSCmd)
 	authCmd.AddCommand(authPnyxCmd)
+	authCmd.AddCommand(authOpenAICmd)
+	authCmd.AddCommand(authPushCmd)
 
 	authGitHubCmd.Flags().StringVarP(&authGitHubToken, "token", "t", "", "GitHub Personal Access Token")
 	authGitHubCmd.Flags().BoolVar(&authGitHubClear, "clear", false, "Clear stored GitHub token")
@@ -137,6 +178,9 @@ func init() {
 
 	authPnyxCmd.Flags().StringVarP(&authPnyxToken, "token", "t", "", "Pnyx API key")
 	authPnyxCmd.Flags().BoolVar(&authPnyxClear, "clear", false, "Clear stored Pnyx API key")
+
+	authOpenAICmd.Flags().StringVarP(&authOpenAIToken, "token", "t", "", "OpenAI API key")
+	authOpenAICmd.Flags().BoolVar(&authOpenAIClear, "clear", false, "Clear stored OpenAI API key")
 }
 
 func runAuthGitHub(cmd *cobra.Command, args []string) error {
@@ -313,6 +357,17 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s (stored: %s)\n", color.GreenString("configured"), masked)
 	} else if token := os.Getenv("PNYX_API_KEY"); token != "" {
 		fmt.Printf("%s (from PNYX_API_KEY env)\n", color.GreenString("configured"))
+	} else {
+		fmt.Printf("%s\n", color.YellowString("not configured"))
+	}
+
+	// Check OpenAI
+	fmt.Print("OpenAI: ")
+	if token := getStoredOpenAIToken(); token != "" {
+		masked := maskToken(token)
+		fmt.Printf("%s (stored: %s)\n", color.GreenString("configured"), masked)
+	} else if token := os.Getenv("OPENAI_API_KEY"); token != "" {
+		fmt.Printf("%s (from OPENAI_API_KEY env)\n", color.GreenString("configured"))
 	} else {
 		fmt.Printf("%s\n", color.YellowString("not configured"))
 	}
@@ -555,6 +610,181 @@ func GetPnyxToken() string {
 		return token
 	}
 	return ""
+}
+
+func runAuthOpenAI(cmd *cobra.Command, args []string) error {
+	tokenFile := getAuthTokenFile("openai")
+
+	if authOpenAIClear {
+		if err := os.Remove(tokenFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear API key: %w", err)
+		}
+		fmt.Println("OpenAI API key cleared.")
+		return nil
+	}
+
+	token := authOpenAIToken
+
+	// If no token provided, check env or prompt
+	if token == "" {
+		if envToken := os.Getenv("OPENAI_API_KEY"); envToken != "" {
+			fmt.Println("OPENAI_API_KEY environment variable is already set.")
+			fmt.Print("Store it for future sessions? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				token = envToken
+			} else {
+				return nil
+			}
+		} else {
+			fmt.Println("Enter your OpenAI API key:")
+			fmt.Println("(Get one at https://platform.openai.com/api-keys)")
+			fmt.Print("> ")
+			reader := bufio.NewReader(os.Stdin)
+			token, _ = reader.ReadString('\n')
+			token = strings.TrimSpace(token)
+		}
+	}
+
+	if token == "" {
+		return fmt.Errorf("no API key provided")
+	}
+
+	// Validate token format
+	if !strings.HasPrefix(token, "sk-") {
+		fmt.Println(color.YellowString("Warning: API key doesn't match expected format (sk-...)."))
+	}
+
+	// Store token
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0700); err != nil {
+		return fmt.Errorf("failed to create auth directory: %w", err)
+	}
+
+	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
+		return fmt.Errorf("failed to store API key: %w", err)
+	}
+
+	fmt.Printf("%s OpenAI API key stored successfully.\n", color.GreenString("✓"))
+	fmt.Println("This key will be used by Codex workers.")
+	fmt.Println()
+	fmt.Println("Push to ECS with:")
+	fmt.Printf("  frank auth push\n")
+	return nil
+}
+
+// getStoredOpenAIToken reads the stored OpenAI API key
+func getStoredOpenAIToken() string {
+	data, err := os.ReadFile(getAuthTokenFile("openai"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// GetOpenAIToken returns the OpenAI API key from stored or environment
+func GetOpenAIToken() string {
+	if token := getStoredOpenAIToken(); token != "" {
+		return token
+	}
+	if token := os.Getenv("OPENAI_API_KEY"); token != "" {
+		return token
+	}
+	return ""
+}
+
+func runAuthPush(cmd *cobra.Command, args []string) error {
+	fmt.Printf("%s Pushing credentials to AWS Secrets Manager...\n\n", color.CyanString("~"))
+
+	type secretPush struct {
+		name     string
+		secretID string
+		value    string
+		source   string
+	}
+
+	var pushes []secretPush
+
+	// GitHub token
+	if token := GetGitHubToken(); token != "" {
+		pushes = append(pushes, secretPush{
+			name:     "GitHub",
+			secretID: "/frank/github-token",
+			value:    token,
+			source:   "frank auth",
+		})
+	}
+
+	// Claude credentials — push the full credentials JSON file, not just the token
+	claudeCredFile := filepath.Join(getHomeDir(), ".claude", ".credentials.json")
+	if data, err := os.ReadFile(claudeCredFile); err == nil && len(data) > 0 {
+		pushes = append(pushes, secretPush{
+			name:     "Claude",
+			secretID: "/frank/claude-credentials",
+			value:    string(data),
+			source:   "~/.claude/.credentials.json",
+		})
+	} else if token := GetClaudeToken(); token != "" {
+		// Fallback: wrap the token in a JSON envelope
+		envelope := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"%s"}}`, token)
+		pushes = append(pushes, secretPush{
+			name:     "Claude",
+			secretID: "/frank/claude-credentials",
+			value:    envelope,
+			source:   "frank auth",
+		})
+	}
+
+	// Pnyx API key
+	if token := GetPnyxToken(); token != "" {
+		pushes = append(pushes, secretPush{
+			name:     "Pnyx",
+			secretID: "/frank/pnyx-api-key",
+			value:    token,
+			source:   "frank auth",
+		})
+	}
+
+	// OpenAI API key
+	if token := GetOpenAIToken(); token != "" {
+		pushes = append(pushes, secretPush{
+			name:     "OpenAI",
+			secretID: "/frank/openai-api-key",
+			value:    token,
+			source:   "frank auth",
+		})
+	}
+
+	if len(pushes) == 0 {
+		fmt.Println("No credentials configured. Use 'frank auth <service>' to set up credentials.")
+		return nil
+	}
+
+	// Push each credential
+	ssoManager := aws.NewSSOManager()
+	succeeded := 0
+	failed := 0
+
+	for _, p := range pushes {
+		fmt.Printf("  %-10s → %s ", p.name, p.secretID)
+		err := ssoManager.PutSecretValue(p.secretID, p.value)
+		if err != nil {
+			fmt.Printf("%s (%v)\n", color.RedString("FAILED"), err)
+			failed++
+		} else {
+			fmt.Printf("%s\n", color.GreenString("OK"))
+			succeeded++
+		}
+	}
+
+	fmt.Println()
+	if failed == 0 {
+		fmt.Printf("%s All %d credentials pushed successfully.\n", color.GreenString("✓"), succeeded)
+	} else {
+		fmt.Printf("%s %d succeeded, %d failed.\n", color.YellowString("~"), succeeded, failed)
+	}
+
+	return nil
 }
 
 func runAuthAWS(cmd *cobra.Command, args []string) error {

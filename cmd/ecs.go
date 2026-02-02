@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
@@ -47,11 +48,14 @@ Examples:
 
 // Subcommand flags
 var (
-	ecsCluster     string
-	ecsRegion      string
-	ecsLogsFollow  bool
-	ecsLogsTail    int
-	prewarmWorkers int
+	ecsCluster      string
+	ecsRegion       string
+	ecsLogsFollow   bool
+	ecsLogsTail     int
+	prewarmWorkers  int
+	dispatchTask    string
+	dispatchModel   string
+	resultsWatch    bool
 )
 
 func init() {
@@ -71,6 +75,15 @@ func init() {
 	ecsCmd.AddCommand(ecsStatusCmd)
 	ecsCmd.AddCommand(ecsExecCmd)
 	ecsCmd.AddCommand(ecsPrewarmCmd)
+
+	// Dispatch command
+	ecsCmd.AddCommand(ecsDispatchCmd)
+	ecsDispatchCmd.Flags().StringVar(&dispatchTask, "task", "", "Task prompt to execute (overrides profile)")
+	ecsDispatchCmd.Flags().StringVar(&dispatchModel, "model", "", "Model to use (overrides profile, default: codex-mini-latest)")
+
+	// Results command
+	ecsCmd.AddCommand(ecsResultsCmd)
+	ecsResultsCmd.Flags().BoolVarP(&resultsWatch, "watch", "w", false, "Poll every 5 seconds until the task completes")
 
 	// Prewarm command flags
 	ecsPrewarmCmd.Flags().IntVar(&prewarmWorkers, "workers", 4, "Number of worktrees to create")
@@ -400,7 +413,7 @@ func runECSList(cmd *cobra.Command, args []string) error {
 
 	// Display as table
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"PROFILE", "TASK ID", "STATUS", "HEALTH", "STARTED"})
+	table.SetHeader([]string{"PROFILE", "TYPE", "TASK ID", "STATUS", "HEALTH", "STARTED"})
 	table.SetBorder(false)
 	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 	table.SetAlignment(tablewriter.ALIGN_LEFT)
@@ -416,12 +429,15 @@ func runECSList(cmd *cobra.Command, args []string) error {
 		status := formatECSStatus(aws.ToString(task.LastStatus))
 		health := formatHealthStatus(task.HealthStatus)
 
-		// Extract profile from tags
+		// Extract profile and task type from tags
 		profileName := "-"
+		taskType := "interactive"
 		for _, tag := range task.Tags {
 			if aws.ToString(tag.Key) == "frank-profile" {
 				profileName = aws.ToString(tag.Value)
-				break
+			}
+			if aws.ToString(tag.Key) == "frank-task-type" {
+				taskType = aws.ToString(tag.Value)
 			}
 		}
 
@@ -430,7 +446,7 @@ func runECSList(cmd *cobra.Command, args []string) error {
 			started = task.StartedAt.Format("2006-01-02 15:04")
 		}
 
-		table.Append([]string{profileName, taskID, status, health, started})
+		table.Append([]string{profileName, taskType, taskID, status, health, started})
 	}
 
 	table.Render()
@@ -1012,6 +1028,498 @@ func runECSExec(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// ============================================================================
+// ecs dispatch - Dispatch a headless Codex worker task
+// ============================================================================
+
+var ecsDispatchCmd = &cobra.Command{
+	Use:   "dispatch <profile>",
+	Short: "Dispatch a headless Codex worker task",
+	Long: `Dispatch a headless Codex worker task on ECS Fargate.
+
+The profile must be configured first using 'frank profile add'.
+This command will:
+  1. Load the profile and apply any --task or --model overrides
+  2. Find the Codex task definition from CloudFormation outputs
+  3. Launch a headless ECS task with the task prompt
+
+No ALB infrastructure is created — headless tasks run independently.
+
+Examples:
+  frank ecs dispatch myproject --task "Fix the login bug"
+  frank ecs dispatch myproject --task "Add unit tests" --model codex-mini-latest`,
+	Args: cobra.ExactArgs(1),
+	RunE: runECSDispatch,
+}
+
+func runECSDispatch(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	profileName := args[0]
+
+	// Load profile configuration
+	p, err := profile.GetProfile(profileName)
+	if err != nil {
+		return fmt.Errorf("profile %q not found. Create it with: frank profile add %s --repo <url>", profileName, profileName)
+	}
+
+	// Apply flag overrides
+	taskPrompt := p.Task
+	if dispatchTask != "" {
+		taskPrompt = dispatchTask
+	}
+
+	model := p.Model
+	if dispatchModel != "" {
+		model = dispatchModel
+	}
+	if model == "" {
+		model = "codex-mini-latest"
+	}
+
+	// Validate task prompt
+	if taskPrompt == "" {
+		return fmt.Errorf("no task prompt specified. Use --task or set 'task' in the profile")
+	}
+
+	fmt.Printf("Dispatching Codex worker for profile %q...\n", profileName)
+
+	// Get ECS client
+	client, err := getECSClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Discover Codex task definition from CloudFormation
+	cfnClient, err := getCFNClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	codexTaskDefArn, err := getStackOutput(ctx, cfnClient, alb.StackName, "CodexTaskDefinitionArn")
+	if err != nil {
+		return fmt.Errorf("failed to find Codex task definition: %w", err)
+	}
+
+	// Get the service to find network configuration
+	descService, err := client.DescribeServices(ctx, &ecs.DescribeServicesInput{
+		Cluster:  aws.String(ecsCluster),
+		Services: []string{defaultService},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to describe service: %w", err)
+	}
+
+	if len(descService.Services) == 0 {
+		return fmt.Errorf("service %s not found in cluster %s", defaultService, ecsCluster)
+	}
+
+	service := descService.Services[0]
+	networkConfig := service.NetworkConfiguration
+
+	// Build container name with timestamp for uniqueness
+	containerName := fmt.Sprintf("%s-%d", profileName, time.Now().Unix())
+
+	branch := p.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	// Build container overrides for codex-worker
+	overrides := &types.TaskOverride{
+		ContainerOverrides: []types.ContainerOverride{
+			{
+				Name: aws.String("codex-worker"),
+				Environment: []types.KeyValuePair{
+					{Name: aws.String("CONTAINER_NAME"), Value: aws.String(containerName)},
+					{Name: aws.String("GIT_REPO"), Value: aws.String(p.Repo)},
+					{Name: aws.String("GIT_BRANCH"), Value: aws.String(branch)},
+					{Name: aws.String("TASK_PROMPT"), Value: aws.String(taskPrompt)},
+					{Name: aws.String("CODEX_MODEL"), Value: aws.String(model)},
+				},
+			},
+		},
+	}
+
+	// Launch the task
+	fmt.Printf("  Task definition: %s\n", extractTaskDefName(codexTaskDefArn))
+	fmt.Printf("  Container:       %s\n", containerName)
+	fmt.Printf("  Model:           %s\n", model)
+	fmt.Printf("  Starting ECS task...\n")
+
+	runResult, err := client.RunTask(ctx, &ecs.RunTaskInput{
+		Cluster:              aws.String(ecsCluster),
+		TaskDefinition:       aws.String(codexTaskDefArn),
+		LaunchType:           types.LaunchTypeFargate,
+		NetworkConfiguration: networkConfig,
+		Overrides:            overrides,
+		Tags: []types.Tag{
+			{Key: aws.String("frank-profile"), Value: aws.String(profileName)},
+			{Key: aws.String("frank-agent"), Value: aws.String("codex")},
+			{Key: aws.String("frank-task-type"), Value: aws.String("headless")},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to run task: %w", err)
+	}
+
+	if len(runResult.Tasks) == 0 {
+		if len(runResult.Failures) > 0 {
+			return fmt.Errorf("failed to start task: %s - %s",
+				aws.ToString(runResult.Failures[0].Reason),
+				aws.ToString(runResult.Failures[0].Detail))
+		}
+		return fmt.Errorf("failed to start task: no task created")
+	}
+
+	task := runResult.Tasks[0]
+	taskID := extractTaskID(*task.TaskArn)
+
+	fmt.Printf("\n%s Codex worker dispatched!\n\n", color.GreenString("✓"))
+	fmt.Printf("  Task ID:    %s\n", color.CyanString(taskID))
+	fmt.Printf("  Container:  %s\n", containerName)
+	fmt.Printf("  Repository: %s\n", p.Repo)
+	fmt.Printf("  Branch:     %s\n", branch)
+	fmt.Printf("  Model:      %s\n", model)
+	fmt.Printf("  Prompt:     %s\n", taskPrompt)
+	fmt.Println()
+	fmt.Printf("Use 'frank ecs logs %s' to check progress\n", taskID)
+	fmt.Printf("Use 'frank ecs stop %s' to cancel the task\n", taskID)
+
+	return nil
+}
+
+// ============================================================================
+// ecs results - Show results from a headless Codex worker task
+// ============================================================================
+
+var ecsResultsCmd = &cobra.Command{
+	Use:   "results <profile-or-container-name>",
+	Short: "Show results from a headless Codex worker task",
+	Long: `Show task status, logs, and result location for a headless Codex worker.
+
+The argument can be:
+  - A profile name: finds the most recent headless task for that profile
+  - A container name directly (e.g., myprofile-1706835200)
+
+Use --watch to poll every 5 seconds until the task completes.
+
+Examples:
+  frank ecs results myproject
+  frank ecs results myproject-1706835200
+  frank ecs results myproject --watch`,
+	Args: cobra.ExactArgs(1),
+	RunE: runECSResults,
+}
+
+func runECSResults(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	arg := args[0]
+
+	client, err := getECSClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	logsClient, err := getLogsClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	for {
+		taskArn, containerName, err := resolveHeadlessTask(ctx, client, arg)
+		if err != nil {
+			return err
+		}
+
+		task, err := describeTask(ctx, client, taskArn)
+		if err != nil {
+			return err
+		}
+
+		// Clear screen on watch iterations (not the first time)
+		printTaskResults(task, containerName)
+
+		// Show logs from CloudWatch
+		taskID := extractTaskID(taskArn)
+		printTaskLogs(ctx, logsClient, taskID)
+
+		// Print EFS results path
+		fmt.Printf("\n%s\n", color.CyanString("Results location (on EFS):"))
+		fmt.Printf("  /workspace/results/%s/result.json   — Codex output\n", containerName)
+		fmt.Printf("  /workspace/results/%s/summary.json  — Metadata\n", containerName)
+		fmt.Printf("  /workspace/results/%s/stderr.log    — Stderr log\n", containerName)
+		fmt.Println()
+		fmt.Printf("Access results from another running Frank container:\n")
+		fmt.Printf("  frank ecs exec <profile> then: cat /workspace/results/%s/result.json\n", containerName)
+
+		status := strings.ToUpper(aws.ToString(task.LastStatus))
+		if !resultsWatch || status == "STOPPED" || status == "DEPROVISIONING" {
+			break
+		}
+
+		fmt.Printf("\n%s Watching... (Ctrl+C to exit)\n", color.YellowString("~"))
+		time.Sleep(5 * time.Second)
+		fmt.Print("\033[2J\033[H") // Clear screen
+	}
+
+	return nil
+}
+
+// resolveHeadlessTask resolves a profile name or container name to a task ARN and container name.
+// It searches both running and recently stopped tasks.
+func resolveHeadlessTask(ctx context.Context, client *ecs.Client, arg string) (taskArn string, containerName string, err error) {
+	// Strategy 1: Treat arg as a profile name — find the most recent headless task
+	// List running tasks
+	statuses := []types.DesiredStatus{types.DesiredStatusRunning, types.DesiredStatusStopped}
+	var allTaskArns []string
+
+	for _, status := range statuses {
+		listResult, err := client.ListTasks(ctx, &ecs.ListTasksInput{
+			Cluster:       aws.String(ecsCluster),
+			DesiredStatus: status,
+		})
+		if err != nil {
+			continue
+		}
+		allTaskArns = append(allTaskArns, listResult.TaskArns...)
+	}
+
+	if len(allTaskArns) == 0 {
+		return "", "", fmt.Errorf("no tasks found in cluster %s", ecsCluster)
+	}
+
+	// Describe all tasks in batches of 100 (ECS API limit)
+	var allTasks []types.Task
+	for i := 0; i < len(allTaskArns); i += 100 {
+		end := i + 100
+		if end > len(allTaskArns) {
+			end = len(allTaskArns)
+		}
+		descResult, err := client.DescribeTasks(ctx, &ecs.DescribeTasksInput{
+			Cluster: aws.String(ecsCluster),
+			Tasks:   allTaskArns[i:end],
+			Include: []types.TaskField{types.TaskFieldTags},
+		})
+		if err != nil {
+			continue
+		}
+		allTasks = append(allTasks, descResult.Tasks...)
+	}
+
+	// Look for matching tasks
+	var bestMatch *types.Task
+	var bestContainerName string
+
+	for i := range allTasks {
+		task := &allTasks[i]
+		tags := make(map[string]string)
+		for _, tag := range task.Tags {
+			tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+		}
+
+		// Extract container name from environment overrides
+		cName := ""
+		for _, co := range task.Overrides.ContainerOverrides {
+			for _, env := range co.Environment {
+				if aws.ToString(env.Name) == "CONTAINER_NAME" {
+					cName = aws.ToString(env.Value)
+				}
+			}
+		}
+
+		// Match by container name directly
+		if cName == arg {
+			return aws.ToString(task.TaskArn), cName, nil
+		}
+
+		// Match by profile name — prefer headless tasks, pick most recent
+		if tags["frank-profile"] == arg && tags["frank-task-type"] == "headless" {
+			if bestMatch == nil || taskIsNewer(task, bestMatch) {
+				bestMatch = task
+				bestContainerName = cName
+			}
+		}
+	}
+
+	if bestMatch != nil {
+		return aws.ToString(bestMatch.TaskArn), bestContainerName, nil
+	}
+
+	return "", "", fmt.Errorf("no headless task found for %q. Check 'frank ecs list' for running tasks", arg)
+}
+
+// taskIsNewer returns true if a is newer than b based on CreatedAt
+func taskIsNewer(a, b *types.Task) bool {
+	if a.CreatedAt == nil {
+		return false
+	}
+	if b.CreatedAt == nil {
+		return true
+	}
+	return a.CreatedAt.After(*b.CreatedAt)
+}
+
+// describeTask describes a single task by ARN
+func describeTask(ctx context.Context, client *ecs.Client, taskArn string) (*types.Task, error) {
+	descResult, err := client.DescribeTasks(ctx, &ecs.DescribeTasksInput{
+		Cluster: aws.String(ecsCluster),
+		Tasks:   []string{taskArn},
+		Include: []types.TaskField{types.TaskFieldTags},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe task: %w", err)
+	}
+	if len(descResult.Tasks) == 0 {
+		return nil, fmt.Errorf("task not found: %s", taskArn)
+	}
+	return &descResult.Tasks[0], nil
+}
+
+// printTaskResults prints formatted task status information
+func printTaskResults(task *types.Task, containerName string) {
+	taskID := extractTaskID(aws.ToString(task.TaskArn))
+	status := strings.ToUpper(aws.ToString(task.LastStatus))
+
+	fmt.Printf("\n%s Task Results\n\n", color.CyanString("Codex Worker"))
+	fmt.Printf("  Task ID:       %s\n", color.CyanString(taskID))
+	fmt.Printf("  Container:     %s\n", containerName)
+	fmt.Printf("  Status:        %s\n", formatECSStatus(status))
+
+	// Extract profile from tags
+	for _, tag := range task.Tags {
+		if aws.ToString(tag.Key) == "frank-profile" {
+			fmt.Printf("  Profile:       %s\n", aws.ToString(tag.Value))
+		}
+	}
+
+	// Exit code from container
+	if len(task.Containers) > 0 {
+		container := task.Containers[0]
+		if container.ExitCode != nil {
+			exitCode := aws.ToInt32(container.ExitCode)
+			if exitCode == 0 {
+				fmt.Printf("  Exit Code:     %s\n", color.GreenString("0"))
+			} else {
+				fmt.Printf("  Exit Code:     %s\n", color.RedString("%d", exitCode))
+			}
+		}
+		if container.Reason != nil {
+			fmt.Printf("  Stop Reason:   %s\n", aws.ToString(container.Reason))
+		}
+	}
+
+	// Stop code at task level
+	if task.StopCode != "" {
+		fmt.Printf("  Stop Code:     %s\n", string(task.StopCode))
+	}
+	if task.StoppedReason != nil {
+		fmt.Printf("  Stopped:       %s\n", aws.ToString(task.StoppedReason))
+	}
+
+	// Duration
+	if task.CreatedAt != nil {
+		fmt.Printf("  Created:       %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
+	}
+	if task.StartedAt != nil {
+		fmt.Printf("  Started:       %s\n", task.StartedAt.Format("2006-01-02 15:04:05"))
+	}
+	if task.StoppedAt != nil {
+		fmt.Printf("  Stopped:       %s\n", task.StoppedAt.Format("2006-01-02 15:04:05"))
+	}
+	if task.StartedAt != nil {
+		endTime := time.Now()
+		if task.StoppedAt != nil {
+			endTime = *task.StoppedAt
+		}
+		duration := endTime.Sub(*task.StartedAt).Round(time.Second)
+		fmt.Printf("  Duration:      %s\n", duration)
+	}
+
+	// Status-specific messages
+	switch status {
+	case "RUNNING", "PENDING", "PROVISIONING":
+		fmt.Printf("\n  %s Task still in progress\n", color.YellowString("~"))
+	case "STOPPED":
+		if len(task.Containers) > 0 && task.Containers[0].ExitCode != nil && aws.ToInt32(task.Containers[0].ExitCode) == 0 {
+			fmt.Printf("\n  %s Task completed successfully\n", color.GreenString("✓"))
+		} else {
+			fmt.Printf("\n  %s Task stopped with errors\n", color.RedString("✗"))
+		}
+	}
+}
+
+// printTaskLogs prints recent CloudWatch log lines for a task
+func printTaskLogs(ctx context.Context, logsClient *cloudwatchlogs.Client, taskID string) {
+	logStreamName := fmt.Sprintf("frank/codex-worker/%s", taskID)
+
+	input := &cloudwatchlogs.GetLogEventsInput{
+		LogGroupName:  aws.String(defaultLogGroup),
+		LogStreamName: aws.String(logStreamName),
+		StartFromHead: aws.Bool(false),
+		Limit:         aws.Int32(30),
+	}
+
+	result, err := logsClient.GetLogEvents(ctx, input)
+	if err != nil {
+		// Try alternative stream name format
+		logStreamName = fmt.Sprintf("frank/frank/%s", taskID)
+		input.LogStreamName = aws.String(logStreamName)
+		result, err = logsClient.GetLogEvents(ctx, input)
+		if err != nil {
+			fmt.Printf("\n  (No logs available yet)\n")
+			return
+		}
+	}
+
+	if len(result.Events) == 0 {
+		fmt.Printf("\n  (No logs available yet)\n")
+		return
+	}
+
+	fmt.Printf("\n%s\n\n", color.CyanString("Recent logs:"))
+	for _, event := range result.Events {
+		timestamp := time.UnixMilli(aws.ToInt64(event.Timestamp)).Format("15:04:05")
+		fmt.Printf("  %s %s\n", color.YellowString(timestamp), aws.ToString(event.Message))
+	}
+}
+
+// getCFNClient creates a CloudFormation client with the configured region
+func getCFNClient(ctx context.Context) (*cloudformation.Client, error) {
+	opts := []func(*config.LoadOptions) error{}
+	if ecsRegion != "" {
+		opts = append(opts, config.WithRegion(ecsRegion))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	return cloudformation.NewFromConfig(cfg), nil
+}
+
+// getStackOutput retrieves a specific output value from a CloudFormation stack
+func getStackOutput(ctx context.Context, client *cloudformation.Client, stackName, outputKey string) (string, error) {
+	output, err := client.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{
+		StackName: aws.String(stackName),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to describe stack %s: %w", stackName, err)
+	}
+
+	if len(output.Stacks) == 0 {
+		return "", fmt.Errorf("stack %s not found", stackName)
+	}
+
+	for _, o := range output.Stacks[0].Outputs {
+		if aws.ToString(o.OutputKey) == outputKey {
+			return aws.ToString(o.OutputValue), nil
+		}
+	}
+
+	return "", fmt.Errorf("output %q not found in stack %s", outputKey, stackName)
 }
 
 // ============================================================================
