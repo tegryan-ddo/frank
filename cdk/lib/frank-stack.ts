@@ -185,7 +185,7 @@ export class FrankStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // Grant ELB read access to task role
+    // Grant ELB access to task role
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: [
         'elasticloadbalancing:DescribeLoadBalancers',
@@ -193,6 +193,9 @@ export class FrankStack extends cdk.Stack {
         'elasticloadbalancing:DescribeRules',
         'elasticloadbalancing:DescribeTargetGroups',
         'elasticloadbalancing:DescribeTargetHealth',
+        'elasticloadbalancing:DeleteRule',
+        'elasticloadbalancing:CreateRule',
+        'elasticloadbalancing:AddTags',
       ],
       resources: ['*'],
     }));
