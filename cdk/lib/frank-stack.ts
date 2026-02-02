@@ -158,6 +158,28 @@ export class FrankStack extends cdk.Stack {
       resources: [`arn:aws:iam::${this.account}:role/pnyx-*`],
     }));
 
+    // Grant ECS task definition permissions (inspect and update task definitions)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'ecs:DescribeTaskDefinition',
+        'ecs:RegisterTaskDefinition',
+        'ecs:ListTaskDefinitions',
+      ],
+      resources: ['*'],
+    }));
+
+    // Grant Cognito permissions (look up user pools and create app clients)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'cognito-idp:ListUserPools',
+        'cognito-idp:DescribeUserPool',
+        'cognito-idp:DescribeUserPoolClient',
+        'cognito-idp:ListUserPoolClients',
+        'cognito-idp:CreateUserPoolClient',
+      ],
+      resources: ['*'],
+    }));
+
     // Grant ELB read access to task role
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: [
