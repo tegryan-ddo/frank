@@ -93,7 +93,7 @@ if [ -z "${TASK_PROMPT:-}" ]; then
     exit 1
 fi
 
-RESULTS_DIR="/workspace/results/${CONTAINER_NAME}"
+RESULTS_DIR="/tmp/codex-results"
 mkdir -p "$RESULTS_DIR"
 
 MODEL="${CODEX_MODEL:-codex-mini-latest}"
@@ -102,7 +102,6 @@ TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "=== Codex Task Execution ==="
 echo "Model:     $MODEL"
 echo "Prompt:    $TASK_PROMPT"
-echo "Results:   $RESULTS_DIR"
 echo "Timestamp: $TIMESTAMP"
 echo "============================"
 
@@ -113,22 +112,35 @@ codex exec \
     --model "$MODEL" \
     -o "$RESULTS_DIR/result.json" \
     "$TASK_PROMPT" \
-    2>"$RESULTS_DIR/stderr.log" || EXIT_CODE=$?
+    2>&1 || EXIT_CODE=$?
 
-# Write summary
-cat > "$RESULTS_DIR/summary.json" <<EOF
+# Emit result as a structured log line that can be parsed from CloudWatch
+# The FRANK_RESULT marker lets the CLI extract the plan/result from logs
+COMPLETED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+echo "=== Task Complete ==="
+echo "Exit code: $EXIT_CODE"
+
+# Output the result file content as a marked block for CloudWatch parsing
+if [ -f "$RESULTS_DIR/result.json" ]; then
+    echo "FRANK_RESULT_BEGIN"
+    cat "$RESULTS_DIR/result.json"
+    echo ""
+    echo "FRANK_RESULT_END"
+fi
+
+# Output structured summary as a marked block
+echo "FRANK_SUMMARY_BEGIN"
+cat <<EOF
 {
   "task_prompt": $(printf '%s' "$TASK_PROMPT" | jq -Rs .),
   "exit_code": $EXIT_CODE,
   "model": "$MODEL",
   "container": "$CONTAINER_NAME",
   "timestamp": "$TIMESTAMP",
-  "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "completed_at": "$COMPLETED_AT"
 }
 EOF
-
-echo "=== Task Complete ==="
-echo "Exit code: $EXIT_CODE"
-echo "Summary:   $RESULTS_DIR/summary.json"
+echo "FRANK_SUMMARY_END"
 
 exit "$EXIT_CODE"
