@@ -101,6 +101,9 @@ COPY build/.claude/mcp.json /root/.claude/mcp.json
 # Copy CLAUDE.md for environment documentation
 COPY build/.claude/CLAUDE.md /root/.claude/CLAUDE.md
 
+# Copy skills (e.g., Pnyx deliberation platform)
+COPY build/.claude/skills/ /root/.claude/skills/
+
 # Copy settings to use Opus 4.5 by default
 # settings.json is the global config, settings.local.json is for project-level
 COPY build/.claude/settings.local.json /root/.claude/settings.json

@@ -95,6 +95,23 @@ else
     echo "WARNING: No GitHub token configured"
 fi
 
+# Setup Pnyx API key (injected by Secrets Manager)
+if [ -n "$PNYX_API_KEY" ]; then
+    echo "Configuring Pnyx API key..."
+    mkdir -p "$HOME/.config/pnyx"
+    cat > "$HOME/.config/pnyx/credentials.json" <<PNYXEOF
+{
+  "api_key": "$PNYX_API_KEY",
+  "api_url": "https://pnyx.digitaldevops.io"
+}
+PNYXEOF
+    chmod 600 "$HOME/.config/pnyx/credentials.json"
+    export PNYX_API_URL="https://pnyx.digitaldevops.io"
+    echo "Pnyx API key configured"
+else
+    echo "WARNING: PNYX_API_KEY not set - Pnyx integration disabled"
+fi
+
 # AWS credentials come automatically from ECS task IAM role
 echo "AWS credentials: using ECS task IAM role"
 echo "  Region: ${AWS_REGION:-us-east-1}"
@@ -465,6 +482,13 @@ fi
 
 cd "$WORK_DIR"
 echo "Current directory: $(pwd)"
+
+# Copy baked-in skills to working directory (e.g., Pnyx)
+if [ -d "/root/.claude/skills" ]; then
+    mkdir -p "$WORK_DIR/.claude/skills"
+    cp -r /root/.claude/skills/* "$WORK_DIR/.claude/skills/" 2>/dev/null || true
+    echo "Copied baked-in skills to $WORK_DIR/.claude/skills/"
+fi
 
 # Install and register plugins now that we know the working directory
 install_plugins "$WORK_DIR"

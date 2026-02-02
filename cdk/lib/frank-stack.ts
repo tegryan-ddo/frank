@@ -70,6 +70,11 @@ export class FrankStack extends cdk.Stack {
       description: 'Claude OAuth credentials for Frank containers',
     });
 
+    const pnyxApiKeySecret = new secretsmanager.Secret(this, 'PnyxApiKey', {
+      secretName: '/frank/pnyx-api-key',
+      description: 'Pnyx API key for agent deliberation platform',
+    });
+
     // =========================================================================
     // Analytics S3 Bucket
     // =========================================================================
@@ -224,6 +229,7 @@ export class FrankStack extends cdk.Stack {
       secrets: {
         GITHUB_TOKEN: ecs.Secret.fromSecretsManager(githubTokenSecret),
         CLAUDE_CREDENTIALS: ecs.Secret.fromSecretsManager(claudeCredentialsSecret),
+        PNYX_API_KEY: ecs.Secret.fromSecretsManager(pnyxApiKeySecret),
       },
       portMappings: [
         { containerPort: 7680, name: 'web' },
@@ -721,6 +727,11 @@ export class FrankStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ClaudeCredentialsSecretArn', {
       value: claudeCredentialsSecret.secretArn,
       description: 'Claude credentials secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/claude-credentials --secret-string "$(cat ~/.claude/.credentials.json)"',
+    });
+
+    new cdk.CfnOutput(this, 'PnyxApiKeySecretArn', {
+      value: pnyxApiKeySecret.secretArn,
+      description: 'Pnyx API key secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/pnyx-api-key --secret-string "pnyx_..."',
     });
 
     new cdk.CfnOutput(this, 'AnalyticsBucketName', {
