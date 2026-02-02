@@ -197,6 +197,38 @@ export class FrankStack extends cdk.Stack {
       resources: ['*'],
     }));
 
+    // Grant SSM write access for Pnyx
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['ssm:PutParameter'],
+      resources: ['arn:aws:ssm:*:*:parameter/pnyx/dev/*'],
+    }));
+
+    // Grant Secrets Manager access for Pnyx
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'secretsmanager:CreateSecret',
+        'secretsmanager:PutSecretValue',
+      ],
+      resources: ['arn:aws:secretsmanager:*:*:secret:pnyx/dev/*'],
+    }));
+
+    // Grant Cognito UpdateUserPoolClient
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['cognito-idp:UpdateUserPoolClient'],
+      resources: ['*'],
+    }));
+
+    // Grant KMS encrypt for SSM SecureString parameters
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['kms:Encrypt'],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          'kms:ViaService': 'ssm.us-east-1.amazonaws.com',
+        },
+      },
+    }));
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
