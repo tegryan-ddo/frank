@@ -187,6 +187,17 @@ export class FrankStack extends cdk.Stack {
       resources: ['*'],
     }));
 
+    // Grant ECS service management permissions (update services, inspect tasks)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'ecs:UpdateService',
+        'ecs:DescribeServices',
+        'ecs:ListTasks',
+        'ecs:DescribeTasks',
+      ],
+      resources: ['*'],
+    }));
+
     // Grant Cognito permissions (look up user pools and create app clients)
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: [
