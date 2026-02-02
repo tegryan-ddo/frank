@@ -163,6 +163,15 @@ export class FrankStack extends cdk.Stack {
       resources: [`arn:aws:iam::${this.account}:role/pnyx-*`],
     }));
 
+    // Grant iam:PassRole for pnyx ECS task definition registration
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['iam:PassRole'],
+      resources: [
+        `arn:aws:iam::${this.account}:role/pnyx-dev-ecs-exec`,
+        `arn:aws:iam::${this.account}:role/pnyx-dev-ecs-task`,
+      ],
+    }));
+
     // Grant ECS task definition permissions (inspect and update task definitions)
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: [
