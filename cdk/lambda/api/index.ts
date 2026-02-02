@@ -50,6 +50,7 @@ interface Profile {
   repo: string;
   branch?: string;
   description?: string;
+  category?: string;
 }
 
 interface ProfileStatus extends Profile {
@@ -784,8 +785,8 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       min-height: 100vh;
       padding: 2rem;
     }
-    .container { max-width: 900px; margin: 0 auto; }
-    header { text-align: center; margin-bottom: 3rem; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 2rem; }
     h1 {
       font-size: 2.5rem;
       font-weight: 600;
@@ -796,45 +797,133 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       background-clip: text;
     }
     .subtitle { color: var(--text-secondary); font-size: 1.1rem; }
-    .profiles-grid { display: grid; gap: 1rem; }
-    .profile-card {
+
+    /* Toolbar: search + category filters */
+    .toolbar {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .search-box {
+      flex: 1;
+      min-width: 200px;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box::placeholder { color: var(--text-secondary); }
+    .search-box:focus { border-color: var(--accent); }
+    .category-filters {
+      display: flex;
+      gap: 0.25rem;
+      flex-wrap: wrap;
+    }
+    .cat-btn {
+      padding: 0.35rem 0.75rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .cat-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+    .cat-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .cat-count {
+      display: inline-block;
+      background: var(--bg-tertiary);
+      border-radius: 10px;
+      padding: 0 0.4rem;
+      font-size: 0.75rem;
+      margin-left: 0.25rem;
+    }
+    .cat-btn.active .cat-count { background: rgba(255,255,255,0.2); }
+
+    /* Table */
+    .profiles-table {
+      width: 100%;
+      border-collapse: collapse;
       background: var(--bg-secondary);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 1.5rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      transition: border-color 0.2s;
+      overflow: hidden;
     }
-    .profile-card:hover { border-color: var(--accent); }
-    .profile-info h3 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.25rem; }
-    .profile-info .description { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem; }
-    .profile-info .repo {
-      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-      font-size: 0.85rem;
-      color: var(--text-secondary);
+    .profiles-table th {
+      text-align: left;
+      padding: 0.75rem 1rem;
       background: var(--bg-tertiary);
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-      display: inline-block;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
     }
-    .profile-actions { display: flex; gap: 0.75rem; align-items: center; }
+    .profiles-table th:hover { color: var(--text-primary); }
+    .profiles-table th .sort-arrow { margin-left: 0.25rem; font-size: 0.7rem; }
+    .profiles-table td {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+      vertical-align: middle;
+    }
+    .profiles-table tr:last-child td { border-bottom: none; }
+    .profiles-table tbody tr { transition: background 0.1s; }
+    .profiles-table tbody tr:hover { background: var(--bg-tertiary); }
+    .category-header td {
+      background: var(--bg-primary);
+      padding: 0.5rem 1rem;
+      font-weight: 600;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+    }
+    .profile-name { font-weight: 600; color: var(--text-primary); }
+    .profile-desc { color: var(--text-secondary); font-size: 0.85rem; }
+    .profile-repo {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+    .profile-branch {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.8rem;
+      background: var(--bg-tertiary);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
     .status-badge {
-      padding: 0.25rem 0.75rem;
+      padding: 0.2rem 0.6rem;
       border-radius: 20px;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       font-weight: 500;
       text-transform: uppercase;
+      display: inline-block;
     }
     .status-running { background: rgba(63, 185, 80, 0.15); color: var(--success); }
     .status-stopped { background: rgba(139, 148, 158, 0.15); color: var(--text-secondary); }
     .status-starting { background: rgba(210, 153, 34, 0.15); color: var(--warning); }
+    .actions-cell { white-space: nowrap; }
+    .actions-cell a, .actions-cell button { margin-right: 0.5rem; }
     button {
-      padding: 0.5rem 1rem;
+      padding: 0.35rem 0.75rem;
       border-radius: 6px;
       border: 1px solid var(--border);
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
@@ -843,54 +932,39 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
     .btn-start:hover { background: #2ea043; }
     .btn-stop { background: transparent; border-color: var(--danger); color: var(--danger); }
     .btn-stop:hover { background: var(--danger); color: #fff; }
-    .btn-open { background: var(--accent); border-color: var(--accent); color: #fff; text-decoration: none; display: inline-block; }
+    .btn-open { background: var(--accent); border-color: var(--accent); color: #fff; text-decoration: none; display: inline-block; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.8rem; font-weight: 500; }
     .btn-open:hover { background: #4393e6; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .loading { text-align: center; padding: 3rem; color: var(--text-secondary); }
     .spinner {
-      display: inline-block;
-      width: 24px;
-      height: 24px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-right: 0.5rem;
-      vertical-align: middle;
+      display: inline-block; width: 24px; height: 24px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 1s linear infinite;
+      margin-right: 0.5rem; vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error {
       background: rgba(248, 81, 73, 0.1);
       border: 1px solid var(--danger);
       color: var(--danger);
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 1rem;
+      padding: 1rem; border-radius: 8px; margin-bottom: 1rem;
     }
     .empty-state {
-      text-align: center;
-      padding: 4rem 2rem;
-      background: var(--bg-secondary);
-      border-radius: 8px;
-      border: 1px dashed var(--border);
+      text-align: center; padding: 4rem 2rem;
+      background: var(--bg-secondary); border-radius: 8px; border: 1px dashed var(--border);
     }
     .empty-state h3 { margin-bottom: 0.5rem; }
     .empty-state p { color: var(--text-secondary); }
     .empty-state code {
-      display: block;
-      margin-top: 1rem;
-      padding: 1rem;
-      background: var(--bg-tertiary);
-      border-radius: 6px;
-      font-family: monospace;
+      display: block; margin-top: 1rem; padding: 1rem;
+      background: var(--bg-tertiary); border-radius: 6px; font-family: monospace;
+    }
+    .no-results {
+      text-align: center; padding: 2rem; color: var(--text-secondary);
     }
     footer {
-      text-align: center;
-      margin-top: 3rem;
-      padding-top: 2rem;
-      border-top: 1px solid var(--border);
-      color: var(--text-secondary);
-      font-size: 0.9rem;
+      text-align: center; margin-top: 3rem; padding-top: 2rem;
+      border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 0.9rem;
     }
     footer a { color: var(--accent); text-decoration: none; }
     footer a:hover { text-decoration: underline; }
@@ -902,12 +976,18 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       <h1>Frank</h1>
       <p class="subtitle">Claude Code on AWS ECS</p>
       <nav style="margin-top: 1rem;">
-        <a href="/dashboard" class="nav-link" style="color: var(--accent); text-decoration: none; padding: 0.5rem 1rem; border: 1px solid var(--accent); border-radius: 6px; font-size: 0.9rem;">📊 Analytics Dashboard</a>
+        <a href="/dashboard" style="color: var(--accent); text-decoration: none; padding: 0.5rem 1rem; border: 1px solid var(--accent); border-radius: 6px; font-size: 0.9rem;">Analytics Dashboard</a>
       </nav>
     </header>
     <div id="error" class="error" style="display: none;"></div>
     <div id="loading" class="loading"><span class="spinner"></span> Loading profiles...</div>
-    <div id="profiles" class="profiles-grid" style="display: none;"></div>
+    <div id="content" style="display: none;">
+      <div class="toolbar">
+        <input type="text" id="search" class="search-box" placeholder="Search profiles..." oninput="renderProfiles()">
+        <div id="categories" class="category-filters"></div>
+      </div>
+      <div id="table-wrap"></div>
+    </div>
     <div id="empty" class="empty-state" style="display: none;">
       <h3>No profiles configured</h3>
       <p>Add a profile using the Frank CLI:</p>
@@ -920,10 +1000,14 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
   <script>
     const API_BASE = '/api';
     let profiles = [];
+    let activeCategory = 'all';
+    let sortCol = 'name';
+    let sortAsc = true;
+
     async function fetchProfiles() {
       try {
         document.getElementById('loading').style.display = 'block';
-        document.getElementById('profiles').style.display = 'none';
+        document.getElementById('content').style.display = 'none';
         document.getElementById('empty').style.display = 'none';
         document.getElementById('error').style.display = 'none';
         const response = await fetch(API_BASE + '/profiles', { credentials: 'include' });
@@ -937,39 +1021,137 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         document.getElementById('loading').style.display = 'none';
       }
     }
+
+    function getCategories() {
+      const cats = {};
+      for (const p of profiles) {
+        const c = p.category || 'Uncategorized';
+        cats[c] = (cats[c] || 0) + 1;
+      }
+      return cats;
+    }
+
+    function setCategory(cat) {
+      activeCategory = cat;
+      renderProfiles();
+    }
+
+    function setSort(col) {
+      if (sortCol === col) { sortAsc = !sortAsc; }
+      else { sortCol = col; sortAsc = true; }
+      renderProfiles();
+    }
+
     function renderProfiles() {
       document.getElementById('loading').style.display = 'none';
       if (profiles.length === 0) {
         document.getElementById('empty').style.display = 'block';
         return;
       }
-      const container = document.getElementById('profiles');
-      container.innerHTML = profiles.map(p => \`
-        <div class="profile-card" data-profile="\${p.name}">
-          <div class="profile-info">
-            <h3>\${p.name}</h3>
-            \${p.description ? '<p class="description">' + p.description + '</p>' : ''}
-            <span class="repo">\${p.repo}</span>
-          </div>
-          <div class="profile-actions">
-            <span class="status-badge status-\${p.status}">\${p.status}</span>
-            \${p.status === 'running'
-              ? '<a href="' + p.url + '" target="_blank" class="btn-open">Open</a><button class="btn-stop" onclick="stopProfile(\\'' + p.name + '\\')">Stop</button>'
-              : '<button class="btn-start" onclick="startProfile(\\'' + p.name + '\\')">Start</button>'}
-          </div>
-        </div>
-      \`).join('');
-      container.style.display = 'grid';
+      document.getElementById('content').style.display = 'block';
+
+      // Build category tabs
+      const cats = getCategories();
+      const catKeys = Object.keys(cats).sort();
+      const catsEl = document.getElementById('categories');
+      catsEl.innerHTML =
+        '<button class="cat-btn ' + (activeCategory === 'all' ? 'active' : '') + '" onclick="setCategory(\\'all\\')">' +
+          'All<span class="cat-count">' + profiles.length + '</span></button>' +
+        catKeys.map(c =>
+          '<button class="cat-btn ' + (activeCategory === c ? 'active' : '') + '" onclick="setCategory(\\'' + c.replace(/'/g, "\\\\'") + '\\')">' +
+            c + '<span class="cat-count">' + cats[c] + '</span></button>'
+        ).join('');
+
+      // Filter
+      const query = (document.getElementById('search').value || '').toLowerCase();
+      let filtered = profiles.filter(p => {
+        if (activeCategory !== 'all' && (p.category || 'Uncategorized') !== activeCategory) return false;
+        if (query) {
+          const haystack = (p.name + ' ' + (p.description || '') + ' ' + p.repo + ' ' + (p.branch || '') + ' ' + (p.category || '')).toLowerCase();
+          return haystack.includes(query);
+        }
+        return true;
+      });
+
+      // Sort
+      filtered.sort((a, b) => {
+        let va, vb;
+        if (sortCol === 'status') { va = a.status; vb = b.status; }
+        else if (sortCol === 'repo') { va = a.repo; vb = b.repo; }
+        else if (sortCol === 'branch') { va = a.branch || 'main'; vb = b.branch || 'main'; }
+        else { va = a.name; vb = b.name; }
+        const cmp = va.localeCompare(vb);
+        return sortAsc ? cmp : -cmp;
+      });
+
+      const wrap = document.getElementById('table-wrap');
+
+      if (filtered.length === 0) {
+        wrap.innerHTML = '<div class="no-results">No profiles match your search.</div>';
+        return;
+      }
+
+      // Group by category when showing all
+      const showGroups = activeCategory === 'all' && catKeys.length > 1;
+      let grouped;
+      if (showGroups) {
+        grouped = {};
+        for (const p of filtered) {
+          const c = p.category || 'Uncategorized';
+          if (!grouped[c]) grouped[c] = [];
+          grouped[c].push(p);
+        }
+      }
+
+      function arrow(col) {
+        if (sortCol !== col) return '';
+        return '<span class="sort-arrow">' + (sortAsc ? '&#9650;' : '&#9660;') + '</span>';
+      }
+
+      let html = '<table class="profiles-table"><thead><tr>' +
+        '<th onclick="setSort(\\'name\\')">Name' + arrow('name') + '</th>' +
+        '<th>Description</th>' +
+        '<th onclick="setSort(\\'repo\\')">Repository' + arrow('repo') + '</th>' +
+        '<th onclick="setSort(\\'branch\\')">Branch' + arrow('branch') + '</th>' +
+        '<th onclick="setSort(\\'status\\')">Status' + arrow('status') + '</th>' +
+        '<th>Actions</th>' +
+        '</tr></thead><tbody>';
+
+      function profileRow(p) {
+        const actions = p.status === 'running'
+          ? '<a href="' + p.url + '" target="_blank" class="btn-open">Open</a>' +
+            '<button class="btn-stop" onclick="stopProfile(\\'' + p.name + '\\')">Stop</button>'
+          : '<button class="btn-start" onclick="startProfile(\\'' + p.name + '\\')">Start</button>';
+        return '<tr data-profile="' + p.name + '">' +
+          '<td class="profile-name">' + p.name + '</td>' +
+          '<td class="profile-desc">' + (p.description || '-') + '</td>' +
+          '<td class="profile-repo">' + p.repo + '</td>' +
+          '<td><span class="profile-branch">' + (p.branch || 'main') + '</span></td>' +
+          '<td><span class="status-badge status-' + p.status + '">' + p.status + '</span></td>' +
+          '<td class="actions-cell">' + actions + '</td></tr>';
+      }
+
+      if (showGroups && grouped) {
+        for (const cat of Object.keys(grouped).sort()) {
+          html += '<tr class="category-header"><td colspan="6">' + cat + ' (' + grouped[cat].length + ')</td></tr>';
+          html += grouped[cat].map(profileRow).join('');
+        }
+      } else {
+        html += filtered.map(profileRow).join('');
+      }
+
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
     }
+
     async function startProfile(name) {
-      const card = document.querySelector('[data-profile="' + name + '"]');
-      const actions = card.querySelector('.profile-actions');
-      const badge = actions.querySelector('.status-badge');
-      const btn = actions.querySelector('button');
-      badge.className = 'status-badge status-starting';
-      badge.textContent = 'starting';
-      btn.disabled = true;
-      btn.textContent = 'Starting...';
+      const row = document.querySelector('tr[data-profile="' + name + '"]');
+      if (row) {
+        const badge = row.querySelector('.status-badge');
+        const btn = row.querySelector('button');
+        if (badge) { badge.className = 'status-badge status-starting'; badge.textContent = 'starting'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+      }
       try {
         const response = await fetch(API_BASE + '/profiles/' + name + '/start', { method: 'POST', credentials: 'include' });
         if (!response.ok) {
@@ -983,11 +1165,13 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         fetchProfiles();
       }
     }
+
     async function stopProfile(name) {
-      const card = document.querySelector('[data-profile="' + name + '"]');
-      const btn = card.querySelector('.btn-stop');
-      btn.disabled = true;
-      btn.textContent = 'Stopping...';
+      const row = document.querySelector('tr[data-profile="' + name + '"]');
+      if (row) {
+        const btn = row.querySelector('.btn-stop');
+        if (btn) { btn.disabled = true; btn.textContent = 'Stopping...'; }
+      }
       try {
         const response = await fetch(API_BASE + '/profiles/' + name + '/stop', { method: 'POST', credentials: 'include' });
         if (!response.ok) {
@@ -1001,6 +1185,7 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         fetchProfiles();
       }
     }
+
     fetchProfiles();
     setInterval(fetchProfiles, 30000);
   </script>
