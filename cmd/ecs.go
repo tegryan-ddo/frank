@@ -1246,13 +1246,10 @@ func runECSResults(cmd *cobra.Command, args []string) error {
 		printTaskLogs(ctx, logsClient, taskID)
 
 		// Print EFS results path
-		fmt.Printf("\n%s\n", color.CyanString("Results location (on EFS):"))
-		fmt.Printf("  /workspace/results/%s/result.json   — Codex output\n", containerName)
-		fmt.Printf("  /workspace/results/%s/summary.json  — Metadata\n", containerName)
-		fmt.Printf("  /workspace/results/%s/stderr.log    — Stderr log\n", containerName)
-		fmt.Println()
-		fmt.Printf("Access results from another running Frank container:\n")
-		fmt.Printf("  frank ecs exec <profile> then: cat /workspace/results/%s/result.json\n", containerName)
+		fmt.Printf("\n%s\n", color.CyanString("Results:"))
+		fmt.Printf("  Results are in the CloudWatch logs above.\n")
+		fmt.Printf("  Look for FRANK_RESULT_BEGIN/END markers for structured output.\n")
+		fmt.Printf("  Full logs: frank ecs logs %s\n", extractTaskID(taskArn))
 
 		status := strings.ToUpper(aws.ToString(task.LastStatus))
 		if !resultsWatch || status == "STOPPED" || status == "DEPROVISIONING" {

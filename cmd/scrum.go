@@ -2,17 +2,15 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
-	"github.com/barff/frank/internal/alb"
 	"github.com/barff/frank/internal/profile"
 	"github.com/barff/frank/internal/scrum"
 	"github.com/fatih/color"
@@ -24,6 +22,7 @@ var (
 	scrumGoal         string
 	scrumModel        string
 	scrumPlannerModel string
+	scrumMaxParallel  int
 )
 
 var scrumCmd = &cobra.Command{
@@ -96,6 +95,7 @@ func init() {
 	scrumRunCmd.MarkFlagRequired("goal")
 	scrumRunCmd.Flags().StringVar(&scrumModel, "model", "codex-mini-latest", "Model for workers")
 	scrumRunCmd.Flags().StringVar(&scrumPlannerModel, "planner-model", "gpt-5.2-codex", "Model for the planning step")
+	scrumRunCmd.Flags().IntVar(&scrumMaxParallel, "max-parallel", 4, "Maximum parallel workers per wave")
 }
 
 // ============================================================================
@@ -166,7 +166,7 @@ func runScrumRun(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %s Planner completed\n", color.GreenString("~"))
 
 	// Read and parse plan from results
-	plan, err := readPlanFromResults(plannerContainerName)
+	plan, err := readPlanFromResults(plannerTaskID)
 	if err != nil {
 		session.Status = "failed"
 		scrum.SaveSession(session)
@@ -213,43 +213,68 @@ func runScrumRun(cmd *cobra.Command, args []string) error {
 
 		var waveTasks []scrum.TaskStatus
 
-		// Dispatch all items in this wave in parallel
-		for _, item := range wave {
-			containerName, taskID, err := dispatchScrumTask(
-				ctx, p, profileName, sessionID,
-				fmt.Sprintf("item-%d", item.ID),
-				scrumModel,
-				item.Prompt,
-				[]types.Tag{
-					{Key: aws.String("frank-scrum-id"), Value: aws.String(sessionID)},
-					{Key: aws.String("frank-scrum-item"), Value: aws.String(fmt.Sprintf("%d", item.ID))},
-				},
-			)
-			if err != nil {
-				fmt.Printf("  %s Failed to dispatch item #%d (%s): %v\n",
-					color.RedString("~"), item.ID, item.Title, err)
-				waveTasks = append(waveTasks, scrum.TaskStatus{
-					WorkItem: item,
-					Status:   "FAILED",
-				})
-				continue
-			}
-
-			fmt.Printf("  %s Dispatched #%-2d %-40s %s\n",
-				color.GreenString("~"), item.ID, item.Title, color.CyanString(taskID))
-
-			waveTasks = append(waveTasks, scrum.TaskStatus{
-				WorkItem:      item,
-				ContainerName: containerName,
-				TaskArn:       taskID, // We use task ID here; full ARN not always needed
-				TaskID:        taskID,
-				Status:        "RUNNING",
-				StartedAt:     time.Now(),
-			})
+		// Dispatch items in this wave, respecting max-parallel limit
+		maxPar := scrumMaxParallel
+		if maxPar <= 0 {
+			maxPar = len(wave) // no limit
 		}
 
-		session.Tasks = append(session.Tasks, waveTasks...)
-		scrum.SaveSession(session)
+		for batchStart := 0; batchStart < len(wave); batchStart += maxPar {
+			batchEnd := batchStart + maxPar
+			if batchEnd > len(wave) {
+				batchEnd = len(wave)
+			}
+			batch := wave[batchStart:batchEnd]
+
+			if len(wave) > maxPar {
+				fmt.Printf("  Batch %d-%d of %d (max-parallel=%d)\n", batchStart+1, batchEnd, len(wave), maxPar)
+			}
+
+			var batchTasks []scrum.TaskStatus
+			for _, item := range batch {
+				containerName, taskID, err := dispatchScrumTask(
+					ctx, p, profileName, sessionID,
+					fmt.Sprintf("item-%d", item.ID),
+					scrumModel,
+					item.Prompt,
+					[]types.Tag{
+						{Key: aws.String("frank-scrum-id"), Value: aws.String(sessionID)},
+						{Key: aws.String("frank-scrum-item"), Value: aws.String(fmt.Sprintf("%d", item.ID))},
+					},
+				)
+				if err != nil {
+					fmt.Printf("  %s Failed to dispatch item #%d (%s): %v\n",
+						color.RedString("~"), item.ID, item.Title, err)
+					batchTasks = append(batchTasks, scrum.TaskStatus{
+						WorkItem: item,
+						Status:   "FAILED",
+					})
+					continue
+				}
+
+				fmt.Printf("  %s Dispatched #%-2d %-40s %s\n",
+					color.GreenString("~"), item.ID, item.Title, color.CyanString(taskID))
+
+				batchTasks = append(batchTasks, scrum.TaskStatus{
+					WorkItem:      item,
+					ContainerName: containerName,
+					TaskArn:       taskID,
+					TaskID:        taskID,
+					Status:        "RUNNING",
+					StartedAt:     time.Now(),
+				})
+			}
+
+			waveTasks = append(waveTasks, batchTasks...)
+			session.Tasks = append(session.Tasks, batchTasks...)
+			scrum.SaveSession(session)
+
+			// Wait for this batch before dispatching the next
+			if batchEnd < len(wave) {
+				fmt.Printf("\n  Waiting for batch to complete before next dispatch...\n\n")
+				waitForWave(ctx, session, batchTasks)
+			}
+		}
 
 		// Wait for all tasks in this wave to complete
 		fmt.Printf("\n  Waiting for wave %d to complete...\n\n", waveIdx)
@@ -675,42 +700,96 @@ func waitForWave(ctx context.Context, session *scrum.ScrumSession, waveTasks []s
 	fmt.Printf("\r%s\r", strings.Repeat(" ", 60)) // Clear the status line
 }
 
-// readPlanFromResults reads the planner's output from the EFS results directory
-func readPlanFromResults(containerName string) (*scrum.ScrumPlan, error) {
-	// Try result.json first (Codex structured output)
-	resultPath := filepath.Join("/workspace/results", containerName, "result.json")
-	data, err := os.ReadFile(resultPath)
-	if err == nil && len(data) > 0 {
-		// The result.json may contain the raw Codex output; try to extract the plan
-		plan, err := scrum.ParsePlanFromJSON(data)
+// readPlanFromResults reads the planner's output from CloudWatch logs.
+// It looks for the FRANK_RESULT_BEGIN/END markers emitted by entrypoint-codex.sh.
+func readPlanFromResults(taskID string) (*scrum.ScrumPlan, error) {
+	ctx := context.Background()
+	logsClient, err := getLogsClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logs client: %w", err)
+	}
+
+	// Read all log events from the task
+	logData, err := readTaskLogContent(ctx, logsClient, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read task logs: %w", err)
+	}
+
+	// Extract content between FRANK_RESULT_BEGIN and FRANK_RESULT_END markers
+	resultContent := extractMarkedBlock(logData, "FRANK_RESULT_BEGIN", "FRANK_RESULT_END")
+	if resultContent != "" {
+		plan, err := scrum.ParsePlanFromJSON([]byte(resultContent))
 		if err == nil {
 			return plan, nil
 		}
-		PrintVerbose("result.json didn't parse as plan directly, trying to extract: %v", err)
+		PrintVerbose("FRANK_RESULT block didn't parse as plan: %v", err)
 	}
 
-	// Try summary.json which may have the output
-	summaryPath := filepath.Join("/workspace/results", containerName, "summary.json")
-	data, err = os.ReadFile(summaryPath)
-	if err == nil && len(data) > 0 {
-		// summary.json might wrap the output in a metadata envelope
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal(data, &envelope); err == nil {
-			if output, ok := envelope["output"]; ok {
-				plan, err := scrum.ParsePlanFromJSON(output)
-				if err == nil {
-					return plan, nil
-				}
+	// Fallback: try to find JSON in the raw log output
+	// Look for anything that looks like a plan JSON object
+	plan, err := scrum.ParsePlanFromJSON([]byte(logData))
+	if err == nil {
+		return plan, nil
+	}
+
+	return nil, fmt.Errorf("could not parse plan from task logs. Check logs: frank ecs logs %s", taskID)
+}
+
+// readTaskLogContent reads all log events for a task and concatenates them.
+func readTaskLogContent(ctx context.Context, client *cloudwatchlogs.Client, taskID string) (string, error) {
+	// Try codex-worker stream first, then frank stream
+	streams := []string{
+		fmt.Sprintf("codex-worker/%s", taskID),
+		fmt.Sprintf("frank/codex-worker/%s", taskID),
+	}
+
+	for _, stream := range streams {
+		result, err := client.GetLogEvents(ctx, &cloudwatchlogs.GetLogEventsInput{
+			LogGroupName:  aws.String(defaultLogGroup),
+			LogStreamName: aws.String(stream),
+			StartFromHead: aws.Bool(true),
+			Limit:         aws.Int32(500),
+		})
+		if err != nil {
+			continue
+		}
+
+		if len(result.Events) > 0 {
+			var lines []string
+			for _, event := range result.Events {
+				lines = append(lines, aws.ToString(event.Message))
 			}
-		}
-		// Try parsing summary.json directly as a plan
-		plan, err := scrum.ParsePlanFromJSON(data)
-		if err == nil {
-			return plan, nil
+			return strings.Join(lines, "\n"), nil
 		}
 	}
 
-	return nil, fmt.Errorf("could not find or parse plan output. Check results at /workspace/results/%s/", containerName)
+	return "", fmt.Errorf("no logs found for task %s", taskID)
+}
+
+// extractMarkedBlock extracts content between begin and end marker lines.
+func extractMarkedBlock(content, beginMarker, endMarker string) string {
+	lines := strings.Split(content, "\n")
+	var capturing bool
+	var captured []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == beginMarker {
+			capturing = true
+			continue
+		}
+		if trimmed == endMarker {
+			break
+		}
+		if capturing {
+			captured = append(captured, line)
+		}
+	}
+
+	if len(captured) == 0 {
+		return ""
+	}
+	return strings.Join(captured, "\n")
 }
 
 // printScrumResults displays a table of task results

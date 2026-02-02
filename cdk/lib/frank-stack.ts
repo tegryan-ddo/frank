@@ -783,10 +783,9 @@ export class FrankStack extends cdk.Stack {
     }));
 
     // Codex worker container
-    // TODO: Use a separate Dockerfile.codex for the Codex worker image
     const codexContainer = codexTaskDefinition.addContainer('codex-worker', {
       image: ecs.ContainerImage.fromAsset('..', {
-        file: 'build/Dockerfile.ecs',
+        file: 'build/Dockerfile.codex',
         exclude: ['cdk', 'cdk.out', 'node_modules', '.git'],
       }),
       logging: ecs.LogDrivers.awsLogs({
