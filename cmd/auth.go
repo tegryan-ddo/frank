@@ -61,6 +61,30 @@ Alternatively, set the CLAUDE_ACCESS_TOKEN environment variable.`,
 	RunE: runAuthClaude,
 }
 
+var authPnyxCmd = &cobra.Command{
+	Use:   "pnyx",
+	Short: "Configure Pnyx API key",
+	Long: `Configure the Pnyx API key for agent deliberation platform access.
+
+Pnyx is a deliberation platform for AI agents to share patterns,
+discuss approaches, and build collective intelligence.
+
+To get your API key:
+  1. Visit https://pnyx.digitaldevops.io/agents
+  2. Create an agent account
+  3. Generate an API key (shown once, format: pnyx_...)
+
+The key will be stored locally and passed to all frank containers.
+For ECS containers, sync it to AWS Secrets Manager:
+  aws secretsmanager put-secret-value --secret-id /frank/pnyx-api-key --secret-string "pnyx_..."`,
+	RunE: runAuthPnyx,
+}
+
+var (
+	authPnyxToken string
+	authPnyxClear bool
+)
+
 var authAWSCmd = &cobra.Command{
 	Use:   "aws [profile]",
 	Short: "Generate temporary AWS credentials",
@@ -100,6 +124,7 @@ func init() {
 	authCmd.AddCommand(authClaudeCmd)
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authAWSCmd)
+	authCmd.AddCommand(authPnyxCmd)
 
 	authGitHubCmd.Flags().StringVarP(&authGitHubToken, "token", "t", "", "GitHub Personal Access Token")
 	authGitHubCmd.Flags().BoolVar(&authGitHubClear, "clear", false, "Clear stored GitHub token")
@@ -109,6 +134,9 @@ func init() {
 
 	authAWSCmd.Flags().StringVar(&authAWSFormat, "format", "env", "Output format: env, export, json, powershell")
 	authAWSCmd.Flags().BoolVar(&authAWSLogin, "login", false, "Perform SSO login if credentials are expired")
+
+	authPnyxCmd.Flags().StringVarP(&authPnyxToken, "token", "t", "", "Pnyx API key")
+	authPnyxCmd.Flags().BoolVar(&authPnyxClear, "clear", false, "Clear stored Pnyx API key")
 }
 
 func runAuthGitHub(cmd *cobra.Command, args []string) error {
@@ -278,6 +306,17 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s\n", color.YellowString("not configured"))
 	}
 
+	// Check Pnyx
+	fmt.Print("Pnyx:   ")
+	if token := getStoredPnyxToken(); token != "" {
+		masked := maskToken(token)
+		fmt.Printf("%s (stored: %s)\n", color.GreenString("configured"), masked)
+	} else if token := os.Getenv("PNYX_API_KEY"); token != "" {
+		fmt.Printf("%s (from PNYX_API_KEY env)\n", color.GreenString("configured"))
+	} else {
+		fmt.Printf("%s\n", color.YellowString("not configured"))
+	}
+
 	// Check SSH
 	fmt.Print("SSH:    ")
 	if sshKeyExists() {
@@ -433,6 +472,87 @@ func GetGHConfigDir() string {
 	ghDir := filepath.Join(getHomeDir(), ".config", "gh")
 	if _, err := os.Stat(filepath.Join(ghDir, "hosts.yml")); err == nil {
 		return ghDir
+	}
+	return ""
+}
+
+func runAuthPnyx(cmd *cobra.Command, args []string) error {
+	tokenFile := getAuthTokenFile("pnyx")
+
+	if authPnyxClear {
+		if err := os.Remove(tokenFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear API key: %w", err)
+		}
+		fmt.Println("Pnyx API key cleared.")
+		return nil
+	}
+
+	token := authPnyxToken
+
+	// If no token provided, check env or prompt
+	if token == "" {
+		if envToken := os.Getenv("PNYX_API_KEY"); envToken != "" {
+			fmt.Println("PNYX_API_KEY environment variable is already set.")
+			fmt.Print("Store it for future sessions? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(response)) == "y" {
+				token = envToken
+			} else {
+				return nil
+			}
+		} else {
+			fmt.Println("Enter your Pnyx API key:")
+			fmt.Println("(Get one at https://pnyx.digitaldevops.io/agents)")
+			fmt.Print("> ")
+			reader := bufio.NewReader(os.Stdin)
+			token, _ = reader.ReadString('\n')
+			token = strings.TrimSpace(token)
+		}
+	}
+
+	if token == "" {
+		return fmt.Errorf("no API key provided")
+	}
+
+	// Validate token format
+	if !strings.HasPrefix(token, "pnyx_") {
+		fmt.Println(color.YellowString("Warning: API key doesn't match expected format (pnyx_...)."))
+	}
+
+	// Store token
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0700); err != nil {
+		return fmt.Errorf("failed to create auth directory: %w", err)
+	}
+
+	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
+		return fmt.Errorf("failed to store API key: %w", err)
+	}
+
+	fmt.Printf("%s Pnyx API key stored successfully.\n", color.GreenString("✓"))
+	fmt.Println("This key will be passed to all frank containers.")
+	fmt.Println()
+	fmt.Println("To sync to ECS containers, run:")
+	fmt.Println("  aws secretsmanager put-secret-value --secret-id /frank/pnyx-api-key --secret-string \"" + maskToken(token) + "\"")
+	return nil
+}
+
+// getStoredPnyxToken reads the stored Pnyx API key
+func getStoredPnyxToken() string {
+	data, err := os.ReadFile(getAuthTokenFile("pnyx"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// GetPnyxToken returns the Pnyx API key from stored or environment
+func GetPnyxToken() string {
+	if token := getStoredPnyxToken(); token != "" {
+		return token
+	}
+	if token := os.Getenv("PNYX_API_KEY"); token != "" {
+		return token
 	}
 	return ""
 }

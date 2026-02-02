@@ -337,6 +337,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		PrintVerbose("Anthropic API key configured")
 	}
 
+	// Setup Pnyx API key
+	if pnyxKey := GetPnyxToken(); pnyxKey != "" {
+		env = append(env, fmt.Sprintf("PNYX_API_KEY=%s", pnyxKey))
+		PrintVerbose("Pnyx API key configured")
+	}
+
 	// Mount SSH directory if requested (via flag or config)
 	if startMountSSH || cfg.GitHub.MountSSH {
 		if sshDir := GetSSHDir(); sshDir != "" {
