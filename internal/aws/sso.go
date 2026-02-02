@@ -228,6 +228,19 @@ func getHomeDir() string {
 	return home
 }
 
+// PutSecretValue updates a secret in AWS Secrets Manager using the AWS CLI
+func (m *SSOManager) PutSecretValue(secretID, value string) error {
+	cmd := exec.Command("aws", "secretsmanager", "put-secret-value",
+		"--secret-id", secretID,
+		"--secret-string", value,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // CredentialsToEnv converts credentials to environment variable format
 func CredentialsToEnv(creds *Credentials) []string {
 	env := []string{
