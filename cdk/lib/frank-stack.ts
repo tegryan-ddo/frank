@@ -270,10 +270,49 @@ export class FrankStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // Grant RDS read access (discover endpoints for DATABASE_URL)
+    // Grant RDS full management for pnyx instances
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['rds:DescribeDBInstances'],
-      resources: [`arn:aws:rds:${this.region}:${this.account}:db:pnyx-*`],
+      actions: [
+        'rds:CreateDBInstance',
+        'rds:DescribeDBInstances',
+        'rds:ModifyDBInstance',
+        'rds:AddTagsToResource',
+        'rds:ListTagsForResource',
+      ],
+      resources: [
+        `arn:aws:rds:${this.region}:${this.account}:db:pnyx-*`,
+      ],
+    }));
+
+    // Grant RDS supporting resource management (subnet groups, parameter groups)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'rds:CreateDBSubnetGroup',
+        'rds:DescribeDBSubnetGroups',
+        'rds:CreateDBParameterGroup',
+        'rds:DescribeDBParameterGroups',
+        'rds:ModifyDBParameterGroup',
+        'rds:DescribeDBEngineVersions',
+        'rds:DescribeOrderableDBInstanceOptions',
+      ],
+      resources: ['*'],
+    }));
+
+    // Grant EC2 permissions for VPC/subnet/security group operations
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'ec2:DescribeSubnets',
+        'ec2:DescribeVpcs',
+        'ec2:DescribeSecurityGroups',
+        'ec2:CreateSecurityGroup',
+        'ec2:AuthorizeSecurityGroupIngress',
+        'ec2:AuthorizeSecurityGroupEgress',
+        'ec2:RevokeSecurityGroupEgress',
+        'ec2:CreateTags',
+        'ec2:DescribeNetworkInterfaces',
+        'ec2:DescribeAvailabilityZones',
+      ],
+      resources: ['*'],
     }));
 
     // Grant Cognito user/pool management (create pools, manage users)
