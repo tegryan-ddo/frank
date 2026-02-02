@@ -388,7 +388,18 @@ async function ensureListenerRuleWithPriority(
   for (const rule of rulesResult.Rules || []) {
     for (const cond of rule.Conditions || []) {
       if (cond.PathPatternConfig?.Values?.includes(pathPatterns[0])) {
-        return; // Rule already exists
+        // Rule exists - check if priority is acceptable (within 5 of target)
+        const existingPriority = parseInt(rule.Priority || '0');
+        if (Math.abs(existingPriority - priority) <= 5) {
+          return; // Rule exists at acceptable priority
+        }
+        // Rule exists but at wrong priority (could be shadowed by catch-all)
+        // Delete and recreate at correct priority
+        console.log(
+          `Rule for ${pathPatterns[0]} exists at priority ${existingPriority} but expected ~${priority}, recreating`
+        );
+        await elbClient.send(new DeleteRuleCommand({ RuleArn: rule.RuleArn! }));
+        break; // Fall through to create rule at correct priority
       }
     }
   }
