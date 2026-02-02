@@ -27,7 +27,7 @@ RUN npm install -g @openai/codex
 RUN mkdir -p /workspace
 
 # Copy entrypoint script
-COPY entrypoint-codex.sh /usr/local/bin/entrypoint-codex.sh
+COPY build/entrypoint-codex.sh /usr/local/bin/entrypoint-codex.sh
 RUN chmod +x /usr/local/bin/entrypoint-codex.sh
 
 # Set environment variables
