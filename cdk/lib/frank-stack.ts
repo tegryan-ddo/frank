@@ -246,6 +246,75 @@ export class FrankStack extends cdk.Stack {
       },
     }));
 
+    // Grant ECS service management (deploy task definition updates)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'ecs:UpdateService',
+        'ecs:DescribeServices',
+        'ecs:ListServices',
+        'ecs:ListTasks',
+        'ecs:DescribeTasks',
+        'ecs:ListClusters',
+      ],
+      resources: ['*'],
+    }));
+
+    // Grant RDS read access (discover endpoints for DATABASE_URL)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['rds:DescribeDBInstances'],
+      resources: [`arn:aws:rds:${this.region}:${this.account}:db:pnyx-*`],
+    }));
+
+    // Grant Cognito user/pool management (create pools, manage users)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'cognito-idp:CreateUserPool',
+        'cognito-idp:AdminCreateUser',
+        'cognito-idp:AdminSetUserPassword',
+        'cognito-idp:ListUsers',
+      ],
+      resources: ['*'],
+    }));
+
+    // Grant SSM read access for Pnyx (verify parameter values)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'ssm:GetParameter',
+        'ssm:GetParameters',
+        'ssm:DescribeParameters',
+        'ssm:DeleteParameter',
+      ],
+      resources: ['arn:aws:ssm:*:*:parameter/pnyx/dev/*'],
+    }));
+
+    // Grant Secrets Manager read access for Pnyx (verify secret values)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'secretsmanager:GetSecretValue',
+        'secretsmanager:DescribeSecret',
+        'secretsmanager:ListSecrets',
+        'secretsmanager:DeleteSecret',
+      ],
+      resources: ['arn:aws:secretsmanager:*:*:secret:pnyx/dev/*'],
+    }));
+
+    // Grant CodePipeline start (trigger deployments)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['codepipeline:StartPipelineExecution'],
+      resources: [`arn:aws:codepipeline:${this.region}:${this.account}:pnyx-*`],
+    }));
+
+    // Grant CloudWatch Logs read access (debug ECS tasks)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'logs:GetLogEvents',
+        'logs:FilterLogEvents',
+        'logs:DescribeLogStreams',
+        'logs:DescribeLogGroups',
+      ],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/ecs/pnyx-*:*`],
+    }));
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
