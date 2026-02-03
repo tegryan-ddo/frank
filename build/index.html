@@ -85,6 +85,96 @@
             display: inline-block;
         }
 
+        .user-badge {
+            display: none;
+            padding: 3px 10px;
+            background: #2d2d2d;
+            color: #9d9d9d;
+            border: 1px solid #3c3c3c;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .user-badge.visible {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .user-badge .user-icon {
+            font-size: 12px;
+        }
+
+        .users-online {
+            display: none;
+            padding: 3px 10px;
+            background: #1e3a1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 10px;
+            font-size: 11px;
+            color: #6a9955;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .users-online.visible {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .users-online:hover {
+            background: #2d5a2d;
+        }
+
+        .users-online .users-count {
+            font-weight: 600;
+        }
+
+        .users-tooltip {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            padding: 8px 0;
+            min-width: 150px;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .users-tooltip.visible {
+            display: block;
+        }
+
+        .users-tooltip-item {
+            padding: 6px 12px;
+            font-size: 11px;
+            color: #d4d4d4;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .users-tooltip-item .user-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #6a9955;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            margin-left: auto;
+        }
+
         .tabs {
             display: flex;
             gap: 4px;
@@ -999,6 +1089,18 @@
             <span class="update-version" id="update-version"></span>
             <button class="restart-btn" id="restart-btn" title="Stop and restart this profile to apply the update">Restart</button>
         </div>
+        <div class="header-right">
+            <span class="user-badge" id="user-badge">
+                <span class="user-icon">&#x1F464;</span>
+                <span id="user-name"></span>
+            </span>
+            <span class="users-online" id="users-online" title="Active users">
+                <span>&#x1F465;</span>
+                <span class="users-count" id="users-count">0</span>
+                <span>online</span>
+            </span>
+            <div class="users-tooltip" id="users-tooltip"></div>
+        </div>
     </div>
 
     <div class="main-container">
@@ -1495,6 +1597,115 @@
         console.log('Starting status polling to:', STATUS_URL);
         pollStatus();
         setInterval(pollStatus, 5000);
+
+        // =============================================
+        // User Tracking & Heartbeat
+        // =============================================
+        (function() {
+            const userBadge = document.getElementById('user-badge');
+            const userName = document.getElementById('user-name');
+            const usersOnline = document.getElementById('users-online');
+            const usersCount = document.getElementById('users-count');
+            const usersTooltip = document.getElementById('users-tooltip');
+
+            let currentUser = null;
+            let activeUsers = [];
+
+            // Fetch current user info
+            async function fetchUserInfo() {
+                try {
+                    const userUrl = STATUS_URL.replace('/status', '/status/user');
+                    const response = await fetch(userUrl);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.authenticated && data.user) {
+                            currentUser = data.user;
+                            userName.textContent = data.user.display_name;
+                            userBadge.classList.add('visible');
+
+                            // Store short_id for potential future use
+                            try {
+                                localStorage.setItem('frank-user-short-id', data.user.short_id);
+                            } catch (e) {}
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch user info:', e);
+                }
+            }
+
+            // Send heartbeat to keep user active
+            async function sendHeartbeat() {
+                try {
+                    const heartbeatUrl = STATUS_URL.replace('/status', '/status/heartbeat');
+                    const response = await fetch(heartbeatUrl, { method: 'POST' });
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('Heartbeat sent, active users:', data.active_users);
+                    }
+                } catch (e) {
+                    console.warn('Heartbeat failed:', e);
+                }
+            }
+
+            // Fetch list of active users
+            async function fetchActiveUsers() {
+                try {
+                    const usersUrl = STATUS_URL.replace('/status', '/status/users');
+                    const response = await fetch(usersUrl);
+                    if (response.ok) {
+                        const data = await response.json();
+                        activeUsers = data.users || [];
+                        const count = data.count || 0;
+
+                        usersCount.textContent = count;
+                        if (count > 0) {
+                            usersOnline.classList.add('visible');
+                        } else {
+                            usersOnline.classList.remove('visible');
+                        }
+
+                        // Update tooltip content
+                        if (activeUsers.length > 0) {
+                            usersTooltip.innerHTML = activeUsers.map(u =>
+                                '<div class="users-tooltip-item">' +
+                                '<span class="user-dot"></span>' +
+                                '<span>' + escapeHtml(u.display_name) + '</span>' +
+                                '</div>'
+                            ).join('');
+                        } else {
+                            usersTooltip.innerHTML = '<div class="users-tooltip-item">No active users</div>';
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch active users:', e);
+                }
+            }
+
+            // Toggle users tooltip on click
+            usersOnline.addEventListener('click', (e) => {
+                e.stopPropagation();
+                usersTooltip.classList.toggle('visible');
+            });
+
+            // Close tooltip when clicking outside
+            document.addEventListener('click', () => {
+                usersTooltip.classList.remove('visible');
+            });
+
+            // Initialize user tracking
+            fetchUserInfo();
+            fetchActiveUsers();
+
+            // Heartbeat every 60 seconds
+            setInterval(sendHeartbeat, 60000);
+
+            // Refresh active users every 30 seconds
+            setInterval(fetchActiveUsers, 30000);
+
+            // Send initial heartbeat after a short delay
+            setTimeout(sendHeartbeat, 2000);
+        })();
 
         // Version polling for update detection
         const updateIndicator = document.getElementById('update-indicator');

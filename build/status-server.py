@@ -13,6 +13,8 @@ import sys
 import re
 import threading
 import uuid
+import hashlib
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from datetime import datetime
@@ -72,6 +74,12 @@ processed_prompt_ids = set()
 current_session_id = str(uuid.uuid4())[:8]
 last_prompt_id = None
 
+# Active user tracking
+active_users = {}  # {user_id: {display_name, email, short_id, last_seen, ...}}
+active_users_lock = threading.Lock()
+ACTIVE_USERS_FILE = '/workspace/.active-users.json'
+USER_TIMEOUT_SECONDS = 120  # Remove users after 2 minutes of inactivity
+
 # Version tracking for update detection
 VERSION_CACHE = {
     'current_revision': None,
@@ -88,6 +96,148 @@ def log(msg):
             f.write(f"{datetime.now().isoformat()} - {msg}\n")
     except:
         pass
+
+
+# =========================================================================
+# User Extraction and Tracking (Multi-User Sessions)
+# =========================================================================
+
+def extract_user_from_headers(headers):
+    """
+    Extract user information from Cognito ALB headers.
+
+    ALB injects these headers after Cognito authentication:
+    - x-amzn-oidc-identity: The user's sub (unique ID)
+    - x-amzn-oidc-data: JWT containing claims (email, name, etc.)
+    - x-amzn-oidc-accesstoken: Access token (not used here)
+
+    Returns: {user_id, email, display_name, short_id} or None if not authenticated
+    """
+    user_id = headers.get('x-amzn-oidc-identity', '')
+    oidc_data = headers.get('x-amzn-oidc-data', '')
+
+    if not user_id:
+        return None
+
+    # Generate short_id from user_id hash (8 characters)
+    short_id = hashlib.sha256(user_id.encode()).hexdigest()[:8]
+
+    # Default values
+    email = ''
+    display_name = ''
+
+    # Try to decode the JWT payload for email and name
+    if oidc_data:
+        try:
+            # JWT format: header.payload.signature
+            parts = oidc_data.split('.')
+            if len(parts) >= 2:
+                # Decode payload (base64url encoded)
+                payload = parts[1]
+                # Add padding if needed
+                padding = 4 - len(payload) % 4
+                if padding != 4:
+                    payload += '=' * padding
+                decoded = base64.urlsafe_b64decode(payload)
+                claims = json.loads(decoded)
+
+                email = claims.get('email', '')
+                # Try various name fields
+                display_name = (
+                    claims.get('name') or
+                    claims.get('preferred_username') or
+                    claims.get('cognito:username') or
+                    email.split('@')[0] if email else ''
+                )
+        except Exception as e:
+            log(f"Error decoding OIDC JWT: {e}")
+
+    # If no display name, use email prefix or short_id
+    if not display_name:
+        display_name = email.split('@')[0] if email else f"user-{short_id}"
+
+    return {
+        'user_id': user_id,
+        'email': email,
+        'display_name': display_name,
+        'short_id': short_id,
+    }
+
+
+def update_active_user(user_info):
+    """Update or add a user to the active users list."""
+    if not user_info:
+        return
+
+    user_id = user_info['user_id']
+    now = time.time()
+
+    with active_users_lock:
+        active_users[user_id] = {
+            'user_id': user_id,
+            'email': user_info.get('email', ''),
+            'display_name': user_info.get('display_name', ''),
+            'short_id': user_info.get('short_id', ''),
+            'last_seen': now,
+            'first_seen': active_users.get(user_id, {}).get('first_seen', now),
+        }
+
+        # Clean up stale users
+        cleanup_stale_users()
+
+        # Persist to file for Lambda to read
+        persist_active_users()
+
+
+def cleanup_stale_users():
+    """Remove users who haven't been seen recently."""
+    now = time.time()
+    stale_ids = [
+        uid for uid, info in active_users.items()
+        if now - info.get('last_seen', 0) > USER_TIMEOUT_SECONDS
+    ]
+    for uid in stale_ids:
+        del active_users[uid]
+        log(f"Removed stale user: {uid[:8]}...")
+
+
+def persist_active_users():
+    """Save active users to a JSON file for Lambda to read."""
+    try:
+        # Prepare data (don't expose full user_id)
+        users_data = {
+            'profile': CONTAINER_NAME,
+            'updated_at': datetime.now().isoformat(),
+            'user_count': len(active_users),
+            'users': [
+                {
+                    'short_id': info['short_id'],
+                    'display_name': info['display_name'],
+                    'last_seen': datetime.fromtimestamp(info['last_seen']).isoformat(),
+                }
+                for info in active_users.values()
+            ]
+        }
+
+        with open(ACTIVE_USERS_FILE, 'w') as f:
+            json.dump(users_data, f, indent=2)
+    except Exception as e:
+        log(f"Error persisting active users: {e}")
+
+
+def get_active_users_list():
+    """Get list of active users (for API response)."""
+    with active_users_lock:
+        cleanup_stale_users()
+        return [
+            {
+                'short_id': info['short_id'],
+                'display_name': info['display_name'],
+                'last_seen': datetime.fromtimestamp(info['last_seen']).isoformat(),
+            }
+            for info in active_users.values()
+        ]
+
 
 def check_port(port, timeout=2):
     """Check if a service is listening on a port."""
@@ -378,6 +528,36 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(proc_stats, indent=2).encode())
                 return
 
+            # User endpoints for multi-user sessions
+            if path == '/status/user':
+                # Extract current user from headers and return info
+                user_info = extract_user_from_headers(dict(self.headers))
+                if user_info:
+                    # Update active users tracking
+                    update_active_user(user_info)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'authenticated': user_info is not None,
+                    'user': user_info,
+                }).encode())
+                return
+
+            if path == '/status/users':
+                # Return list of active users
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                users = get_active_users_list()
+                self.wfile.write(json.dumps({
+                    'count': len(users),
+                    'users': users,
+                }).encode())
+                return
+
             # Static file serving
             # Handle directory requests (serve index.html)
             if path == '/' or path == '':
@@ -457,6 +637,31 @@ class StatusHandler(BaseHTTPRequestHandler):
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode())
+                return
+
+            elif path == '/status/heartbeat':
+                # Update user's last_seen timestamp
+                user_info = extract_user_from_headers(dict(self.headers))
+                if user_info:
+                    update_active_user(user_info)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': True,
+                        'user': user_info,
+                        'active_users': len(active_users),
+                    }).encode())
+                else:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': False,
+                        'message': 'No user authentication found',
+                    }).encode())
                 return
 
             elif path == '/status/feedback':

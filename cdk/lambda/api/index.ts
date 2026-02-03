@@ -57,6 +57,8 @@ interface ProfileStatus extends Profile {
   status: 'running' | 'stopped';
   taskId?: string;
   url?: string;
+  activeUsers?: number;
+  users?: Array<{ display_name: string; short_id: string }>;
 }
 
 interface ApiResponse {
@@ -189,19 +191,61 @@ async function getRunningTasks(): Promise<Map<string, { taskId: string; ip: stri
   return taskMap;
 }
 
+async function fetchActiveUsers(
+  ip: string
+): Promise<{ count: number; users: Array<{ display_name: string; short_id: string }> }> {
+  try {
+    // Fetch from container's status endpoint (port 7680)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
+    const response = await fetch(`http://${ip}:7680/status/users`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = (await response.json()) as {
+        count?: number;
+        users?: Array<{ display_name: string; short_id: string }>;
+      };
+      return {
+        count: data.count || 0,
+        users: data.users || [],
+      };
+    }
+  } catch (e) {
+    // Ignore fetch errors (task may be starting up)
+    console.log(`Failed to fetch active users from ${ip}:`, e);
+  }
+  return { count: 0, users: [] };
+}
+
 async function listProfiles(): Promise<ApiResponse> {
   const profiles = await getProfiles();
   const runningTasks = await getRunningTasks();
 
-  const statuses: ProfileStatus[] = profiles.map((p) => {
-    const running = runningTasks.get(p.name);
-    return {
-      ...p,
-      status: running ? 'running' : 'stopped',
-      taskId: running?.taskId,
-      url: `https://${DOMAIN}/${p.name}/`,
-    };
-  });
+  // Build base statuses
+  const statuses: ProfileStatus[] = await Promise.all(
+    profiles.map(async (p) => {
+      const running = runningTasks.get(p.name);
+      const status: ProfileStatus = {
+        ...p,
+        status: running ? 'running' : 'stopped',
+        taskId: running?.taskId,
+        url: `https://${DOMAIN}/${p.name}/`,
+      };
+
+      // Fetch active users for running tasks
+      if (running?.ip) {
+        const userInfo = await fetchActiveUsers(running.ip);
+        status.activeUsers = userInfo.count;
+        status.users = userInfo.users;
+      }
+
+      return status;
+    })
+  );
 
   return {
     statusCode: 200,
@@ -917,6 +961,24 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
     .status-running { background: rgba(63, 185, 80, 0.15); color: var(--success); }
     .status-stopped { background: rgba(139, 148, 158, 0.15); color: var(--text-secondary); }
     .status-starting { background: rgba(210, 153, 34, 0.15); color: var(--warning); }
+    .users-badge {
+      padding: 0.2rem 0.5rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .users-badge.has-users { background: rgba(63, 185, 80, 0.15); color: var(--success); }
+    .users-badge.no-users { background: var(--bg-tertiary); color: var(--text-secondary); }
+    .url-link {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.8rem;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .url-link:hover { text-decoration: underline; }
     .actions-cell { white-space: nowrap; }
     .actions-cell a, .actions-cell button { margin-right: 0.5rem; }
     button {
@@ -1077,10 +1139,14 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       filtered.sort((a, b) => {
         let va, vb;
         if (sortCol === 'status') { va = a.status; vb = b.status; }
-        else if (sortCol === 'repo') { va = a.repo; vb = b.repo; }
-        else if (sortCol === 'branch') { va = a.branch || 'main'; vb = b.branch || 'main'; }
+        else if (sortCol === 'users') {
+          // Sort by active users count (numeric)
+          const countA = a.activeUsers || 0;
+          const countB = b.activeUsers || 0;
+          return sortAsc ? countA - countB : countB - countA;
+        }
         else { va = a.name; vb = b.name; }
-        const cmp = va.localeCompare(vb);
+        const cmp = (va || '').localeCompare(vb || '');
         return sortAsc ? cmp : -cmp;
       });
 
@@ -1111,9 +1177,9 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       let html = '<table class="profiles-table"><thead><tr>' +
         '<th onclick="setSort(\\'name\\')">Name' + arrow('name') + '</th>' +
         '<th>Description</th>' +
-        '<th onclick="setSort(\\'repo\\')">Repository' + arrow('repo') + '</th>' +
-        '<th onclick="setSort(\\'branch\\')">Branch' + arrow('branch') + '</th>' +
         '<th onclick="setSort(\\'status\\')">Status' + arrow('status') + '</th>' +
+        '<th onclick="setSort(\\'users\\')">Users' + arrow('users') + '</th>' +
+        '<th>URL</th>' +
         '<th>Actions</th>' +
         '</tr></thead><tbody>';
 
@@ -1122,12 +1188,18 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
           ? '<a href="' + p.url + '" target="_blank" class="btn-open">Open</a>' +
             '<button class="btn-stop" onclick="stopProfile(\\'' + p.name + '\\')">Stop</button>'
           : '<button class="btn-start" onclick="startProfile(\\'' + p.name + '\\')">Start</button>';
+        const userCount = p.activeUsers || 0;
+        const usersClass = userCount > 0 ? 'has-users' : 'no-users';
+        const usersText = userCount > 0 ? userCount + ' online' : '-';
+        const urlCell = p.status === 'running'
+          ? '<a href="' + p.url + '" target="_blank" class="url-link">/' + p.name + '/</a>'
+          : '<span style="color: var(--text-secondary);">-</span>';
         return '<tr data-profile="' + p.name + '">' +
           '<td class="profile-name">' + p.name + '</td>' +
           '<td class="profile-desc">' + (p.description || '-') + '</td>' +
-          '<td class="profile-repo">' + p.repo + '</td>' +
-          '<td><span class="profile-branch">' + (p.branch || 'main') + '</span></td>' +
           '<td><span class="status-badge status-' + p.status + '">' + p.status + '</span></td>' +
+          '<td><span class="users-badge ' + usersClass + '">' + usersText + '</span></td>' +
+          '<td>' + urlCell + '</td>' +
           '<td class="actions-cell">' + actions + '</td></tr>';
       }
 
@@ -1139,6 +1211,8 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       } else {
         html += filtered.map(profileRow).join('');
       }
+
+      // Note: colspan stays at 6 because we replaced Repo/Branch with Users/URL
 
       html += '</tbody></table>';
       wrap.innerHTML = html;

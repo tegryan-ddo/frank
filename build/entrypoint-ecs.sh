@@ -601,6 +601,11 @@ fi
 echo "Starting Claude terminal on port $TTYD_PORT (path: $CLAUDE_BASE_PATH)..."
 echo "=== Frank ECS Container Ready ==="
 
+# Note: user-session.sh is available for per-user workspace isolation
+# Currently using shared session; per-user sessions can be enabled by changing to:
+#   user-session.sh frank-claude claude
+# which will create /workspace/users/{user_short_id}/ directories per user
+
 exec ttyd -p "${TTYD_PORT}" -W \
     -t fontSize=16 \
     -t fontFamily="Consolas, 'Courier New', monospace" \
