@@ -36,10 +36,6 @@ var (
 	profileAddRepo        string
 	profileAddBranch      string
 	profileAddDescription string
-	profileAddAgent       string
-	profileAddMode        string
-	profileAddTask        string
-	profileAddModel       string
 )
 
 // SSM parameter name for profiles
@@ -59,10 +55,6 @@ func init() {
 	profileAddCmd.Flags().StringVarP(&profileAddRepo, "repo", "r", "", "Git repository URL (required)")
 	profileAddCmd.Flags().StringVarP(&profileAddBranch, "branch", "b", "main", "Git branch")
 	profileAddCmd.Flags().StringVarP(&profileAddDescription, "description", "d", "", "Profile description")
-	profileAddCmd.Flags().StringVar(&profileAddAgent, "agent", "claude", "AI agent backend (claude, codex)")
-	profileAddCmd.Flags().StringVar(&profileAddMode, "mode", "interactive", "Execution mode (interactive, headless)")
-	profileAddCmd.Flags().StringVar(&profileAddTask, "task", "", "Task prompt for headless mode")
-	profileAddCmd.Flags().StringVar(&profileAddModel, "model", "", "Model override (e.g. codex-mini, gpt-5.2-codex)")
 	profileAddCmd.MarkFlagRequired("repo")
 }
 
@@ -156,10 +148,6 @@ func runProfileAdd(cmd *cobra.Command, args []string) error {
 		Repo:        profileAddRepo,
 		Branch:      profileAddBranch,
 		Description: profileAddDescription,
-		Agent:       profileAddAgent,
-		Mode:        profileAddMode,
-		Task:        profileAddTask,
-		Model:       profileAddModel,
 	}
 
 	if err := profile.AddProfile(p); err != nil {
@@ -171,14 +159,6 @@ func runProfileAdd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Branch:      %s\n", p.Branch)
 	if p.Description != "" {
 		fmt.Printf("  Description: %s\n", p.Description)
-	}
-	fmt.Printf("  Agent:       %s\n", p.GetAgent())
-	fmt.Printf("  Mode:        %s\n", p.GetMode())
-	if p.Task != "" {
-		fmt.Printf("  Task:        %s\n", p.Task)
-	}
-	if p.Model != "" {
-		fmt.Printf("  Model:       %s\n", p.Model)
 	}
 	fmt.Println()
 	fmt.Printf("Start with: frank ecs start %s\n", name)
@@ -212,14 +192,6 @@ func runProfileShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Branch:      %s\n", p.Branch)
 	if p.Description != "" {
 		fmt.Printf("  Description: %s\n", p.Description)
-	}
-	fmt.Printf("  Agent:       %s\n", p.GetAgent())
-	fmt.Printf("  Mode:        %s\n", p.GetMode())
-	if p.Task != "" {
-		fmt.Printf("  Task:        %s\n", p.Task)
-	}
-	if p.Model != "" {
-		fmt.Printf("  Model:       %s\n", p.Model)
 	}
 	fmt.Println()
 	fmt.Printf("  URL:         https://frank.digitaldevops.io/%s/\n", name)
