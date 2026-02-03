@@ -585,6 +585,47 @@
             cursor: default;
         }
 
+        .prompt-bubble-send.stop {
+            background: #a83232;
+        }
+
+        .prompt-bubble-send.stop:hover {
+            background: #c43e3e;
+        }
+
+        .prompt-timer-select {
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            color: #d4d4d4;
+            font-size: 11px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .prompt-timer-select:focus {
+            border-color: #0e639c;
+        }
+
+        .prompt-fab.timer-active::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 8px;
+            height: 8px;
+            background: #6a9955;
+            border-radius: 50%;
+            border: 1.5px solid #1e1e1e;
+            animation: timer-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes timer-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
         .prompt-copied-toast {
             position: fixed;
             bottom: 20px;
@@ -1091,6 +1132,14 @@
                     <input type="checkbox" id="prompt-auto-submit" checked>
                     <span>Auto-submit</span>
                 </label>
+                <select id="prompt-timer" class="prompt-timer-select" title="Repeat interval">
+                    <option value="0">Once</option>
+                    <option value="60">1m</option>
+                    <option value="300">5m</option>
+                    <option value="600">10m</option>
+                    <option value="1800">30m</option>
+                    <option value="3600">1h</option>
+                </select>
                 <button class="prompt-bubble-send" id="prompt-bubble-send">Send</button>
             </div>
         </div>
@@ -1516,12 +1565,77 @@
             const bubble = document.getElementById('prompt-bubble');
             const textarea = document.getElementById('prompt-bubble-text');
             const sendBtn = document.getElementById('prompt-bubble-send');
+            const timerSelect = document.getElementById('prompt-timer');
+
+            let timerInterval = null;
+            let countdownInterval = null;
+            let timerRemainingSeconds = 0;
+            let timerTotalSeconds = 0;
+            let timerPromptText = '';
 
             function showToast(message) {
                 const toast = document.getElementById('prompt-toast');
                 toast.textContent = message;
                 toast.classList.add('visible');
                 setTimeout(() => toast.classList.remove('visible'), 2000);
+            }
+
+            function formatCountdown(seconds) {
+                const m = Math.floor(seconds / 60);
+                const s = seconds % 60;
+                return m + ':' + String(s).padStart(2, '0');
+            }
+
+            function stopTimer() {
+                if (timerInterval) clearInterval(timerInterval);
+                if (countdownInterval) clearInterval(countdownInterval);
+                timerInterval = null;
+                countdownInterval = null;
+                timerRemainingSeconds = 0;
+                timerTotalSeconds = 0;
+                timerPromptText = '';
+                sendBtn.textContent = 'Send';
+                sendBtn.classList.remove('stop');
+                fab.classList.remove('timer-active');
+                timerSelect.disabled = false;
+            }
+
+            function startCountdown() {
+                timerRemainingSeconds = timerTotalSeconds;
+                if (countdownInterval) clearInterval(countdownInterval);
+                countdownInterval = setInterval(() => {
+                    timerRemainingSeconds--;
+                    if (timerRemainingSeconds <= 0) {
+                        timerRemainingSeconds = timerTotalSeconds;
+                    }
+                    sendBtn.textContent = 'Stop (' + formatCountdown(timerRemainingSeconds) + ')';
+                }, 1000);
+            }
+
+            async function doSend(text) {
+                const autoSubmit = document.getElementById('prompt-auto-submit').checked;
+                try {
+                    const sendUrl = STATUS_URL.replace('/status', '/status/send-prompt');
+                    const response = await fetch(sendUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, autoSubmit, session: 'frank-claude' }),
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success) {
+                            return true;
+                        } else {
+                            showToast('Failed: ' + (data.message || data.error || 'Unknown error'));
+                        }
+                    } else {
+                        showToast('Failed: HTTP ' + response.status);
+                    }
+                } catch (e) {
+                    console.error('Send failed:', e);
+                    showToast('Network error: ' + e.message);
+                }
+                return false;
             }
 
             fab.addEventListener('click', () => {
@@ -1533,43 +1647,61 @@
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape' && bubble.classList.contains('open')) {
                     bubble.classList.remove('open');
-                    fab.textContent = '+';
+                    fab.textContent = timerInterval ? '+' : '+';
                 }
             });
 
             async function sendPrompt() {
+                // If timer is running, stop it
+                if (timerInterval) {
+                    stopTimer();
+                    showToast('Timer stopped');
+                    return;
+                }
+
                 const text = textarea.value.trim();
                 if (!text) return;
 
-                const autoSubmit = document.getElementById('prompt-auto-submit').checked;
+                const interval = parseInt(timerSelect.value, 10);
+
                 sendBtn.disabled = true;
                 sendBtn.textContent = '...';
 
-                try {
-                    const sendUrl = STATUS_URL.replace('/status', '/status/send-prompt');
-                    const response = await fetch(sendUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text, autoSubmit, session: 'frank-claude' }),
-                    });
+                const ok = await doSend(text);
 
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.success) {
-                            showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
-                            textarea.value = '';
-                            bubble.classList.remove('open');
-                            fab.textContent = '+';
-                        } else {
-                            showToast('Failed: ' + (data.message || data.error || 'Unknown error'));
-                        }
+                if (ok) {
+                    const autoSubmit = document.getElementById('prompt-auto-submit').checked;
+                    showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
+
+                    if (interval > 0) {
+                        // Start recurring timer
+                        timerPromptText = text;
+                        timerTotalSeconds = interval;
+                        timerSelect.disabled = true;
+                        fab.classList.add('timer-active');
+                        sendBtn.classList.add('stop');
+                        sendBtn.disabled = false;
+
+                        startCountdown();
+
+                        timerInterval = setInterval(async () => {
+                            const sent = await doSend(timerPromptText);
+                            if (sent) {
+                                showToast('Timer: sent to Claude');
+                            }
+                        }, interval * 1000);
+
+                        // Close bubble but keep timer running
+                        bubble.classList.remove('open');
+                        fab.textContent = '+';
                     } else {
-                        showToast('Failed: HTTP ' + response.status);
+                        textarea.value = '';
+                        bubble.classList.remove('open');
+                        fab.textContent = '+';
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'Send';
                     }
-                } catch (e) {
-                    console.error('Send failed:', e);
-                    showToast('Network error: ' + e.message);
-                } finally {
+                } else {
                     sendBtn.disabled = false;
                     sendBtn.textContent = 'Send';
                 }
