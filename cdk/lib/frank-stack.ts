@@ -365,6 +365,18 @@ export class FrankStack extends cdk.Stack {
       resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/ecs/pnyx-*:*`],
     }));
 
+    // Grant CloudFormation full access (manage CDK stacks)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['cloudformation:*'],
+      resources: ['*'],
+    }));
+
+    // Grant ability to assume CDK bootstrap roles (deploy/destroy stacks)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['sts:AssumeRole'],
+      resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
+    }));
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
