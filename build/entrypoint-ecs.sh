@@ -82,6 +82,24 @@ fi
 # Start Codex credential sync (shares device auth tokens across containers)
 /usr/local/bin/codex-credential-sync.sh &
 
+# Create Codex wrapper to disable Landlock sandbox (ECS containers have restrictive security)
+# The sandbox prevents Codex from executing shell commands in this environment
+if command -v codex >/dev/null 2>&1; then
+    CODEX_REAL=$(command -v codex)
+    # Only wrap if not already wrapped
+    if ! grep -q "codex-wrapper" "$CODEX_REAL" 2>/dev/null; then
+        echo "Creating Codex wrapper to disable sandbox..."
+        mv "$CODEX_REAL" "${CODEX_REAL}-original"
+        cat > "$CODEX_REAL" <<'CODEXWRAP'
+#!/bin/bash
+# Codex wrapper - disables Landlock sandbox for ECS compatibility
+exec "$(dirname "$0")/codex-original" --dangerously-disable-sandbox "$@"
+CODEXWRAP
+        chmod +x "$CODEX_REAL"
+        echo "Codex sandbox disabled for ECS environment"
+    fi
+fi
+
 # Setup GitHub token (injected by Copilot secrets)
 if [ -n "$GITHUB_TOKEN" ]; then
     echo "Configuring GitHub token..."
