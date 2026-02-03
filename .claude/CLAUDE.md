@@ -114,7 +114,11 @@ Worker nodes include multiple AI coding agents:
 | claude | `@anthropic-ai/claude-code` | Claude Code CLI (primary) |
 | codex | `@openai/codex` | OpenAI Codex CLI |
 
-**Codex** requires `OPENAI_API_KEY` which is injected from Secrets Manager (`/frank/openai-api-key`).
+**Codex** uses device authentication (ChatGPT Max subscription). On first use, run:
+```bash
+codex login --device-auth
+```
+Credentials are automatically synced across containers via Secrets Manager (`/frank/codex-credentials`).
 
 ## MCP Servers
 
