@@ -76,6 +76,8 @@ gh pr create --title "My PR" --body "Description"
 codex login --device-auth
 ```
 
+> **Note**: The Landlock sandbox is automatically disabled in ECS containers to allow shell command execution.
+
 ## Tips
 
 1. **Persistent storage**: Files in `/workspace` persist via EFS

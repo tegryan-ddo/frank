@@ -120,6 +120,8 @@ codex login --device-auth
 ```
 Credentials are automatically synced across containers via Secrets Manager (`/frank/codex-credentials`).
 
+> **Note**: The Landlock sandbox is automatically disabled in ECS containers to allow shell command execution. The wrapper script at container startup handles this transparently.
+
 ## MCP Servers
 
 Worker nodes come pre-configured with the following MCP servers:
