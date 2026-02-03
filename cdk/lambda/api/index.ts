@@ -222,30 +222,37 @@ async function fetchActiveUsers(
 }
 
 async function listProfiles(): Promise<ApiResponse> {
-  const profiles = await getProfiles();
-  const runningTasks = await getRunningTasks();
+  // Fetch profiles and running tasks in parallel
+  const [profiles, runningTasks] = await Promise.all([
+    getProfiles(),
+    getRunningTasks(),
+  ]);
 
-  // Build base statuses
-  const statuses: ProfileStatus[] = await Promise.all(
-    profiles.map(async (p) => {
-      const running = runningTasks.get(p.name);
-      const status: ProfileStatus = {
-        ...p,
-        status: running ? 'running' : 'stopped',
-        taskId: running?.taskId,
-        url: `https://${DOMAIN}/${p.name}/`,
-      };
+  // Build base statuses (without user counts yet)
+  const statuses: ProfileStatus[] = profiles.map((p) => {
+    const running = runningTasks.get(p.name);
+    return {
+      ...p,
+      status: running ? 'running' : 'stopped',
+      taskId: running?.taskId,
+      url: `https://${DOMAIN}/${p.name}/`,
+    };
+  });
 
-      // Fetch active users for running tasks
-      if (running?.ip) {
-        const userInfo = await fetchActiveUsers(running.ip);
-        status.activeUsers = userInfo.count;
-        status.users = userInfo.users;
-      }
+  // Fetch active users for all running tasks in parallel
+  const runningStatuses = statuses.filter((s) => s.status === 'running');
+  const userInfoPromises = runningStatuses.map((s) => {
+    const running = runningTasks.get(s.name);
+    return running?.ip ? fetchActiveUsers(running.ip) : Promise.resolve({ count: 0, users: [] });
+  });
 
-      return status;
-    })
-  );
+  const userInfoResults = await Promise.all(userInfoPromises);
+
+  // Merge user info back into statuses
+  runningStatuses.forEach((s, i) => {
+    s.activeUsers = userInfoResults[i].count;
+    s.users = userInfoResults[i].users;
+  });
 
   return {
     statusCode: 200,
@@ -1065,17 +1072,22 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
     let activeCategory = 'all';
     let sortCol = 'name';
     let sortAsc = true;
+    let isInitialLoad = true;
 
     async function fetchProfiles() {
       try {
-        document.getElementById('loading').style.display = 'block';
-        document.getElementById('content').style.display = 'none';
-        document.getElementById('empty').style.display = 'none';
+        // Only show loading spinner on initial load, not refreshes
+        if (isInitialLoad) {
+          document.getElementById('loading').style.display = 'block';
+          document.getElementById('content').style.display = 'none';
+          document.getElementById('empty').style.display = 'none';
+        }
         document.getElementById('error').style.display = 'none';
         const response = await fetch(API_BASE + '/profiles', { credentials: 'include' });
         if (!response.ok) throw new Error('Failed to fetch profiles');
         const data = await response.json();
         profiles = data.profiles || [];
+        isInitialLoad = false;
         renderProfiles();
       } catch (error) {
         document.getElementById('error').textContent = error.message;
