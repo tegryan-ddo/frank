@@ -105,6 +105,17 @@ frank ecs logs <task-id>
 frank ecs status
 ```
 
+## AI Coding Agents
+
+Worker nodes include multiple AI coding agents:
+
+| Agent | Package | Description |
+|-------|---------|-------------|
+| claude | `@anthropic-ai/claude-code` | Claude Code CLI (primary) |
+| codex | `@openai/codex` | OpenAI Codex CLI |
+
+**Codex** requires `OPENAI_API_KEY` which is injected from Secrets Manager (`/frank/openai-api-key`).
+
 ## MCP Servers
 
 Worker nodes come pre-configured with the following MCP servers:
