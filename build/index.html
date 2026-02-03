@@ -474,296 +474,115 @@
             border-color: #4ec9b0;
         }
 
-        /* Prompt Drawer Overlay */
-        .prompt-drawer-backdrop {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.4);
-            z-index: 500;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.25s ease;
-        }
-
-        .prompt-drawer-backdrop.visible {
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .prompt-drawer {
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            height: 50vh;
-            max-height: 600px;
-            min-height: 200px;
-            background: #1e1e1e;
-            border-top: 1px solid #3c3c3c;
-            z-index: 501;
-            display: flex;
-            flex-direction: column;
-            transform: translateY(100%);
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 12px 12px 0 0;
-        }
-
-        .prompt-drawer.open {
-            transform: translateY(0);
-        }
-
-        .prompt-drawer-handle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 16px 8px;
-            flex-shrink: 0;
-        }
-
-        .prompt-drawer-handle::before {
-            content: '';
-            position: absolute;
-            top: 8px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 32px;
-            height: 3px;
-            background: #4c4c4c;
-            border-radius: 2px;
-        }
-
-        .prompt-drawer-title {
-            font-size: 13px;
-            font-weight: 500;
-            color: #cccccc;
-        }
-
-        .prompt-drawer-controls {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .prompt-drawer-close {
-            background: transparent;
-            border: none;
-            color: #9d9d9d;
-            cursor: pointer;
-            font-size: 18px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            line-height: 1;
-            transition: all 0.15s;
-        }
-
-        .prompt-drawer-close:hover {
-            background: #3c3c3c;
-            color: #ffffff;
-        }
-
-        .prompt-drawer-items {
-            flex: 1;
-            overflow-y: auto;
-            padding: 4px 16px 8px;
-            scrollbar-width: thin;
-            scrollbar-color: #3c3c3c #1e1e1e;
-        }
-
-        .prompt-drawer-items::-webkit-scrollbar {
-            width: 5px;
-        }
-
-        .prompt-drawer-items::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .prompt-drawer-items::-webkit-scrollbar-thumb {
-            background: #3c3c3c;
-            border-radius: 3px;
-        }
-
-        .prompt-drawer-empty {
-            color: #555;
-            font-size: 12px;
-            text-align: center;
-            padding: 32px 16px;
-        }
-
-        .prompt-drawer-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
-            padding: 8px 10px;
-            background: #252526;
-            border: 1px solid #333;
-            border-radius: 6px;
-            margin-bottom: 6px;
-            cursor: pointer;
-            transition: border-color 0.15s, background 0.15s;
-            position: relative;
-        }
-
-        .prompt-drawer-item:hover {
-            border-color: #4c4c4c;
-        }
-
-        .prompt-drawer-item.editing {
-            border-color: #0e639c;
-            cursor: default;
-        }
-
-        .prompt-drawer-item-text {
-            flex: 1;
-            font-size: 12px;
-            color: #d4d4d4;
-            font-family: 'Consolas', 'Monaco', monospace;
-            line-height: 1.5;
-            white-space: pre-wrap;
-            word-break: break-word;
-            min-height: 18px;
-        }
-
-        .prompt-drawer-item textarea {
-            flex: 1;
-            background: #1e1e1e;
-            border: none;
-            color: #d4d4d4;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
-            line-height: 1.5;
-            padding: 4px 6px;
-            border-radius: 3px;
-            resize: none;
-            outline: none;
-            min-height: 32px;
-            overflow: hidden;
-        }
-
-        .prompt-drawer-item textarea::placeholder {
-            color: #555;
-        }
-
-        .prompt-drawer-item-actions {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            flex-shrink: 0;
-        }
-
-        .prompt-drawer-item .item-send-btn {
-            background: #0e639c;
-            border: none;
-            color: #fff;
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 3px;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: background 0.15s;
-        }
-
-        .prompt-drawer-item .item-send-btn:hover {
-            background: #1177bb;
-        }
-
-        .prompt-drawer-item .item-delete-btn {
-            background: transparent;
-            border: none;
-            color: #6d6d6d;
-            font-size: 13px;
-            padding: 2px 6px;
-            border-radius: 3px;
-            cursor: pointer;
-            transition: all 0.15s;
-            text-align: center;
-        }
-
-        .prompt-drawer-item .item-delete-btn:hover {
-            background: #5a2d2d;
-            color: #f44747;
-        }
-
-        /* Bottom input bar */
-        .prompt-drawer-input-bar {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            border-top: 1px solid #333;
-            background: #252526;
-            border-radius: 0 0 0 0;
-            flex-shrink: 0;
-        }
-
-        .prompt-drawer-input-bar input {
-            flex: 1;
-            background: #1e1e1e;
-            border: 1px solid #3c3c3c;
-            color: #d4d4d4;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
-            padding: 8px 12px;
-            border-radius: 6px;
-            outline: none;
-            transition: border-color 0.15s;
-        }
-
-        .prompt-drawer-input-bar input:focus {
-            border-color: #0e639c;
-        }
-
-        .prompt-drawer-input-bar input::placeholder {
-            color: #555;
-        }
-
-        .prompt-auto-submit {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 11px;
-            color: #9d9d9d;
-            cursor: pointer;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-
-        .prompt-auto-submit input[type="checkbox"] {
-            accent-color: #0e639c;
-            cursor: pointer;
-        }
-
-        /* Floating trigger button */
-        .prompt-drawer-trigger {
+        /* Floating Prompt Bubble */
+        .prompt-fab {
             position: fixed;
             bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 40px;
+            right: 16px;
+            width: 36px;
+            height: 36px;
             background: #0e639c;
             border: none;
             border-radius: 50%;
             color: #fff;
-            font-size: 20px;
+            font-size: 22px;
+            font-weight: 300;
             cursor: pointer;
-            z-index: 400;
+            z-index: 500;
             display: flex;
             align-items: center;
             justify-content: center;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
             transition: background 0.15s, transform 0.15s;
+            line-height: 1;
         }
 
-        .prompt-drawer-trigger:hover {
+        .prompt-fab:hover {
             background: #1177bb;
-            transform: translateX(-50%) scale(1.05);
+            transform: scale(1.08);
         }
 
-        .prompt-drawer-trigger.hidden {
+        .prompt-bubble {
+            position: fixed;
+            bottom: 62px;
+            right: 16px;
+            width: 320px;
+            max-height: 220px;
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 10px;
+            z-index: 501;
             display: none;
+            flex-direction: column;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        .prompt-bubble.open {
+            display: flex;
+        }
+
+        .prompt-bubble textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 10px 12px;
+            resize: none;
+            outline: none;
+            min-height: 80px;
+        }
+
+        .prompt-bubble textarea::placeholder {
+            color: #555;
+        }
+
+        .prompt-bubble-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 6px 10px;
+            border-top: 1px solid #333;
+            background: #252526;
+        }
+
+        .prompt-bubble-bar label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #9d9d9d;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .prompt-bubble-bar label input[type="checkbox"] {
+            accent-color: #0e639c;
+            cursor: pointer;
+        }
+
+        .prompt-bubble-send {
+            background: #0e639c;
+            border: none;
+            color: #fff;
+            font-size: 11px;
+            padding: 5px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .prompt-bubble-send:hover {
+            background: #1177bb;
+        }
+
+        .prompt-bubble-send:disabled {
+            opacity: 0.5;
+            cursor: default;
         }
 
         .prompt-copied-toast {
@@ -1259,29 +1078,20 @@
         </div>
 
         <!-- Toast notification -->
-        <div class="prompt-copied-toast" id="prompt-toast">Copied to clipboard!</div>
+        <div class="prompt-copied-toast" id="prompt-toast"></div>
 
-        <!-- Prompt Drawer Trigger -->
-        <button class="prompt-drawer-trigger" id="prompt-drawer-trigger" title="Prompt Drawer">&#x270E;</button>
+        <!-- Floating prompt button -->
+        <button class="prompt-fab" id="prompt-fab" title="Send prompt to Claude">+</button>
 
-        <!-- Prompt Drawer Backdrop -->
-        <div class="prompt-drawer-backdrop" id="prompt-drawer-backdrop"></div>
-
-        <!-- Prompt Drawer -->
-        <div class="prompt-drawer" id="prompt-drawer">
-            <div class="prompt-drawer-handle">
-                <span class="prompt-drawer-title">Prompts</span>
-                <div class="prompt-drawer-controls">
-                    <label class="prompt-auto-submit" title="Auto-submit after sending">
-                        <input type="checkbox" id="prompt-auto-submit" checked>
-                        <span>Auto-submit</span>
-                    </label>
-                    <button class="prompt-drawer-close" id="prompt-drawer-close" title="Close">&times;</button>
-                </div>
-            </div>
-            <div class="prompt-drawer-items" id="prompt-items"></div>
-            <div class="prompt-drawer-input-bar">
-                <input type="text" id="prompt-new-input" placeholder="Type a prompt and press Enter..." autocomplete="off">
+        <!-- Floating prompt bubble -->
+        <div class="prompt-bubble" id="prompt-bubble">
+            <textarea id="prompt-bubble-text" placeholder="Type a prompt for Claude..." rows="4"></textarea>
+            <div class="prompt-bubble-bar">
+                <label title="Auto-submit after sending">
+                    <input type="checkbox" id="prompt-auto-submit" checked>
+                    <span>Auto-submit</span>
+                </label>
+                <button class="prompt-bubble-send" id="prompt-bubble-send">Send</button>
             </div>
         </div>
     </div>
@@ -1700,68 +1510,12 @@
             }
         });
 
-        // Prompt Drawer Logic
+        // Floating Prompt Bubble
         (function() {
-            // Scope storage by profile name so each instance has its own prompts
-            const pathParts = window.location.pathname.split('/').filter(Boolean);
-            const staticRoutes = ['claude', 'bash', 'status', 'health', 'api', 'dashboard', '_t', '_b'];
-            const profileKey = (pathParts[0] && !staticRoutes.includes(pathParts[0])) ? pathParts[0] : '_default';
-            const PROMPT_STORAGE_KEY = 'frank-prompt-items-' + profileKey;
-
-            const drawer = document.getElementById('prompt-drawer');
-            const backdrop = document.getElementById('prompt-drawer-backdrop');
-            const trigger = document.getElementById('prompt-drawer-trigger');
-            const closeBtn = document.getElementById('prompt-drawer-close');
-            const container = document.getElementById('prompt-items');
-            const newInput = document.getElementById('prompt-new-input');
-
-            let promptItems = [];
-            let editingIndex = -1;
-
-            function openDrawer() {
-                drawer.classList.add('open');
-                backdrop.classList.add('visible');
-                trigger.classList.add('hidden');
-                newInput.focus();
-            }
-
-            function closeDrawer() {
-                drawer.classList.remove('open');
-                backdrop.classList.remove('visible');
-                trigger.classList.remove('hidden');
-                editingIndex = -1;
-            }
-
-            trigger.addEventListener('click', openDrawer);
-            closeBtn.addEventListener('click', closeDrawer);
-            backdrop.addEventListener('click', closeDrawer);
-
-            // Escape to close
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && drawer.classList.contains('open')) {
-                    closeDrawer();
-                }
-            });
-
-            function loadPromptItems() {
-                try {
-                    const saved = localStorage.getItem(PROMPT_STORAGE_KEY);
-                    if (saved) {
-                        promptItems = JSON.parse(saved);
-                    }
-                } catch (e) {
-                    console.warn('Failed to load prompt items:', e);
-                    promptItems = [];
-                }
-            }
-
-            function savePromptItems() {
-                try {
-                    localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(promptItems));
-                } catch (e) {
-                    console.warn('Failed to save prompt items:', e);
-                }
-            }
+            const fab = document.getElementById('prompt-fab');
+            const bubble = document.getElementById('prompt-bubble');
+            const textarea = document.getElementById('prompt-bubble-text');
+            const sendBtn = document.getElementById('prompt-bubble-send');
 
             function showToast(message) {
                 const toast = document.getElementById('prompt-toast');
@@ -1770,33 +1524,42 @@
                 setTimeout(() => toast.classList.remove('visible'), 2000);
             }
 
-            async function sendItemToClaude(index) {
-                const text = promptItems[index].text.trim();
+            fab.addEventListener('click', () => {
+                const isOpen = bubble.classList.toggle('open');
+                fab.textContent = isOpen ? '\u00D7' : '+';
+                if (isOpen) textarea.focus();
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && bubble.classList.contains('open')) {
+                    bubble.classList.remove('open');
+                    fab.textContent = '+';
+                }
+            });
+
+            async function sendPrompt() {
+                const text = textarea.value.trim();
                 if (!text) return;
 
                 const autoSubmit = document.getElementById('prompt-auto-submit').checked;
-                const sendBtn = container.querySelector(`[data-index="${index}"] .item-send-btn`);
-                if (sendBtn) {
-                    sendBtn.disabled = true;
-                    sendBtn.textContent = '...';
-                }
+                sendBtn.disabled = true;
+                sendBtn.textContent = '...';
 
                 try {
                     const sendUrl = STATUS_URL.replace('/status', '/status/send-prompt');
                     const response = await fetch(sendUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            text: text,
-                            autoSubmit: autoSubmit,
-                            session: 'frank-claude',
-                        }),
+                        body: JSON.stringify({ text, autoSubmit, session: 'frank-claude' }),
                     });
 
                     if (response.ok) {
                         const data = await response.json();
                         if (data.success) {
                             showToast(autoSubmit ? 'Sent to Claude!' : 'Pasted into Claude terminal');
+                            textarea.value = '';
+                            bubble.classList.remove('open');
+                            fab.textContent = '+';
                         } else {
                             showToast('Failed: ' + (data.message || data.error || 'Unknown error'));
                         }
@@ -1807,128 +1570,19 @@
                     console.error('Send failed:', e);
                     showToast('Network error: ' + e.message);
                 } finally {
-                    if (sendBtn) {
-                        sendBtn.disabled = false;
-                        sendBtn.textContent = 'Send';
-                    }
-                }
-            }
-
-            function renderPromptItems() {
-                container.innerHTML = '';
-
-                if (promptItems.length === 0) {
-                    const empty = document.createElement('div');
-                    empty.className = 'prompt-drawer-empty';
-                    empty.textContent = 'No prompts yet. Type below to add one.';
-                    container.appendChild(empty);
-                    return;
-                }
-
-                promptItems.forEach((item, index) => {
-                    const el = document.createElement('div');
-                    el.className = 'prompt-drawer-item';
-                    el.dataset.index = index;
-
-                    if (editingIndex === index) {
-                        el.classList.add('editing');
-
-                        const textarea = document.createElement('textarea');
-                        textarea.value = item.text;
-                        textarea.placeholder = 'Edit prompt...';
-                        textarea.addEventListener('input', (e) => {
-                            promptItems[index].text = e.target.value;
-                            savePromptItems();
-                            // Auto-resize
-                            textarea.style.height = 'auto';
-                            textarea.style.height = Math.max(32, textarea.scrollHeight) + 'px';
-                        });
-                        textarea.addEventListener('keydown', (e) => {
-                            if (e.key === 'Escape') {
-                                editingIndex = -1;
-                                renderPromptItems();
-                            }
-                        });
-                        textarea.addEventListener('blur', () => {
-                            // Small delay to allow button clicks to register
-                            setTimeout(() => {
-                                if (editingIndex === index) {
-                                    editingIndex = -1;
-                                    renderPromptItems();
-                                }
-                            }, 150);
-                        });
-
-                        el.appendChild(textarea);
-
-                        // Auto-resize on mount
-                        requestAnimationFrame(() => {
-                            textarea.style.height = 'auto';
-                            textarea.style.height = Math.max(32, textarea.scrollHeight) + 'px';
-                            textarea.focus();
-                            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-                        });
-                    } else {
-                        const textEl = document.createElement('div');
-                        textEl.className = 'prompt-drawer-item-text';
-                        textEl.textContent = item.text || '(empty)';
-                        textEl.addEventListener('click', () => {
-                            editingIndex = index;
-                            renderPromptItems();
-                        });
-                        el.appendChild(textEl);
-                    }
-
-                    const actions = document.createElement('div');
-                    actions.className = 'prompt-drawer-item-actions';
-
-                    const sendBtn = document.createElement('button');
-                    sendBtn.className = 'item-send-btn';
+                    sendBtn.disabled = false;
                     sendBtn.textContent = 'Send';
-                    sendBtn.title = 'Send this prompt to Claude';
-                    sendBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        sendItemToClaude(index);
-                    });
-
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'item-delete-btn';
-                    deleteBtn.innerHTML = '&times;';
-                    deleteBtn.title = 'Delete';
-                    deleteBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        promptItems.splice(index, 1);
-                        if (editingIndex === index) editingIndex = -1;
-                        else if (editingIndex > index) editingIndex--;
-                        savePromptItems();
-                        renderPromptItems();
-                    });
-
-                    actions.appendChild(sendBtn);
-                    actions.appendChild(deleteBtn);
-                    el.appendChild(actions);
-                    container.appendChild(el);
-                });
+                }
             }
 
-            // Add new item via input bar
-            newInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+            sendBtn.addEventListener('click', sendPrompt);
+
+            textarea.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
-                    const text = newInput.value.trim();
-                    if (!text) return;
-                    promptItems.push({ text: text });
-                    savePromptItems();
-                    newInput.value = '';
-                    renderPromptItems();
-                    // Scroll to bottom
-                    container.scrollTop = container.scrollHeight;
+                    sendPrompt();
                 }
             });
-
-            // Initialize
-            loadPromptItems();
-            renderPromptItems();
         })();
 
         // Mobile Tab Switching
