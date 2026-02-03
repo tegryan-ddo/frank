@@ -87,6 +87,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && mv /root/.local/bin/claude /usr/local/bin/claude \
     && ln -s /usr/local/bin/claude /root/.local/bin/claude
 
+# Install Codex CLI (OpenAI's coding agent)
+RUN npm install -g @openai/codex
+
 # Create directories (running as root for volume mount compatibility)
 RUN mkdir -p /root/.config/claude-code \
     && mkdir -p /root/.aws \
@@ -127,6 +130,10 @@ RUN chmod +x /usr/local/bin/user-session.sh
 # Copy credential sync script (shares OAuth tokens across containers)
 COPY build/credential-sync.sh /usr/local/bin/credential-sync.sh
 RUN chmod +x /usr/local/bin/credential-sync.sh
+
+# Copy Codex credential sync script (shares device auth across containers)
+COPY build/codex-credential-sync.sh /usr/local/bin/codex-credential-sync.sh
+RUN chmod +x /usr/local/bin/codex-credential-sync.sh
 
 # Copy ECS-specific entrypoint
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh

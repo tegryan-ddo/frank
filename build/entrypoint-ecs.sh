@@ -79,6 +79,9 @@ fi
 # Start credential sync (shares OAuth tokens across containers via Secrets Manager)
 /usr/local/bin/credential-sync.sh &
 
+# Start Codex credential sync (shares device auth tokens across containers)
+/usr/local/bin/codex-credential-sync.sh &
+
 # Setup GitHub token (injected by Copilot secrets)
 if [ -n "$GITHUB_TOKEN" ]; then
     echo "Configuring GitHub token..."

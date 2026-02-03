@@ -64,6 +64,18 @@ gh repo clone owner/repo
 gh pr create --title "My PR" --body "Description"
 ```
 
+## AI Coding Agents
+
+| Agent | Package | Description |
+|-------|---------|-------------|
+| `claude` | Claude Code CLI | Primary coding agent |
+| `codex` | `@openai/codex` | OpenAI Codex CLI |
+
+**Codex** uses device authentication. On first use, run:
+```bash
+codex login --device-auth
+```
+
 ## Tips
 
 1. **Persistent storage**: Files in `/workspace` persist via EFS
