@@ -84,6 +84,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install Codex CLI
+RUN npm install -g @openai/codex
+
 # Create necessary directories (running as root for volume mount compatibility)
 RUN mkdir -p /root/.config/claude-code \
     && mkdir -p /root/.aws \
