@@ -75,6 +75,11 @@ export class FrankStack extends cdk.Stack {
       description: 'Pnyx API key for agent deliberation platform',
     });
 
+    const openaiApiKeySecret = new secretsmanager.Secret(this, 'OpenAIApiKey', {
+      secretName: '/frank/openai-api-key',
+      description: 'OpenAI API key for Codex CLI',
+    });
+
     // =========================================================================
     // Analytics S3 Bucket
     // =========================================================================
@@ -360,6 +365,18 @@ export class FrankStack extends cdk.Stack {
       resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/ecs/pnyx-*:*`],
     }));
 
+    // Grant CloudFormation full access (manage CDK stacks)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['cloudformation:*'],
+      resources: ['*'],
+    }));
+
+    // Grant ability to assume CDK bootstrap roles (deploy/destroy stacks)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['sts:AssumeRole'],
+      resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
+    }));
+
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
       logGroupName: '/ecs/frank',
@@ -393,6 +410,7 @@ export class FrankStack extends cdk.Stack {
         GITHUB_TOKEN: ecs.Secret.fromSecretsManager(githubTokenSecret),
         CLAUDE_CREDENTIALS: ecs.Secret.fromSecretsManager(claudeCredentialsSecret),
         PNYX_API_KEY: ecs.Secret.fromSecretsManager(pnyxApiKeySecret),
+        OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openaiApiKeySecret),
       },
       portMappings: [
         { containerPort: 7680, name: 'web' },
@@ -895,6 +913,11 @@ export class FrankStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'PnyxApiKeySecretArn', {
       value: pnyxApiKeySecret.secretArn,
       description: 'Pnyx API key secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/pnyx-api-key --secret-string "pnyx_..."',
+    });
+
+    new cdk.CfnOutput(this, 'OpenAIApiKeySecretArn', {
+      value: openaiApiKeySecret.secretArn,
+      description: 'OpenAI API key secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/openai-api-key --secret-string "sk-..."',
     });
 
     new cdk.CfnOutput(this, 'AnalyticsBucketName', {
