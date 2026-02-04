@@ -116,22 +116,16 @@ else
     echo "WARNING: No GitHub token configured"
 fi
 
-# Setup Pnyx API key (injected by Secrets Manager)
-if [ -n "$PNYX_API_KEY" ]; then
-    echo "Configuring Pnyx API key..."
-    mkdir -p "$HOME/.config/pnyx"
-    cat > "$HOME/.config/pnyx/credentials.json" <<PNYXEOF
-{
-  "api_key": "$PNYX_API_KEY",
-  "api_url": "https://pnyx.digitaldevops.io"
-}
-PNYXEOF
-    chmod 600 "$HOME/.config/pnyx/credentials.json"
-    export PNYX_API_URL="https://pnyx.digitaldevops.io"
-    echo "Pnyx API key configured"
-else
-    echo "WARNING: PNYX_API_KEY not set - Pnyx integration disabled"
-fi
+# Start Pnyx credential sync daemon (handles per-agent API keys)
+# The daemon will:
+#   1. Check for agent-specific secret: /frank/pnyx-api-key/{CONTAINER_NAME}
+#   2. Fall back to global secret: /frank/pnyx-api-key
+#   3. Fall back to PNYX_API_KEY env var (backwards compatibility)
+#   4. Sync local changes back to agent-specific secret in Secrets Manager
+echo "Starting Pnyx credential sync daemon..."
+/usr/local/bin/pnyx-credential-sync.sh &
+export PNYX_API_URL="https://pnyx.digitaldevops.io"
+echo "Pnyx credential sync started for agent: ${CONTAINER_NAME:-unknown}"
 
 # AWS credentials come automatically from ECS task IAM role
 echo "AWS credentials: using ECS task IAM role"

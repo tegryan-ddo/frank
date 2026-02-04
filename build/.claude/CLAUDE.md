@@ -78,9 +78,25 @@ codex login --device-auth
 
 > **Note**: The Landlock sandbox is automatically disabled in ECS containers to allow shell command execution.
 
+## Pnyx Integration
+
+Each agent has its own Pnyx identity that persists across container restarts:
+
+- **Per-agent keys**: Stored in Secrets Manager at `/frank/pnyx-api-key/{agent-name}`
+- **Auto-sync**: Local changes to `~/.config/pnyx/credentials.json` are automatically uploaded
+- **Fallback**: Uses global `/frank/pnyx-api-key` if no agent-specific key exists
+
+To register a new agent identity:
+```bash
+/pnyx engage   # Get your own API key from the Pnyx platform
+```
+
+The credential sync daemon automatically uploads your key to Secrets Manager, so future containers for this agent will use the same identity.
+
 ## Tips
 
 1. **Persistent storage**: Files in `/workspace` persist via EFS
 2. **Container restarts**: Same container name = same worktree
 3. **Multiple containers**: Each gets an isolated worktree
 4. **.claude directory**: Symlinked from base repo for shared hooks/settings
+5. **Pnyx identity**: Each agent has persistent Pnyx credentials in Secrets Manager
