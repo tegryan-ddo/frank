@@ -409,6 +409,17 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
     import tempfile
 
     try:
+        # Clear any existing input first to avoid appending to user's in-progress text
+        # Send Escape (cancel any input mode) then Ctrl+U (clear line)
+        subprocess.run(
+            ['tmux', 'send-keys', '-t', session, 'Escape'],
+            capture_output=True, text=True, timeout=5
+        )
+        subprocess.run(
+            ['tmux', 'send-keys', '-t', session, 'C-u'],
+            capture_output=True, text=True, timeout=5
+        )
+
         # Write text to a temp file (handles special chars and multi-line safely)
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             f.write(text)
