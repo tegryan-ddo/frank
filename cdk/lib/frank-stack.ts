@@ -119,263 +119,39 @@ export class FrankStack extends cdk.Stack {
       ],
     });
 
+    // Task Role with PowerUserAccess for broad AWS permissions
+    const taskRole = new iam.Role(this, 'FrankTaskRole', {
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('PowerUserAccess'),
+      ],
+    });
+
+    // PowerUserAccess excludes IAM mutations - add specific IAM permissions needed
+    taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['sts:AssumeRole'],
+      resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
+    }));
+    taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['iam:PassRole'],
+      resources: ['*'],
+    }));
+    taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['iam:PutRolePolicy', 'iam:GetRolePolicy'],
+      resources: [`arn:aws:iam::${this.account}:role/pnyx-*`],
+    }));
+
     // Task Definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FrankTask', {
       memoryLimitMiB: 8192,
       cpu: 4096,
       ephemeralStorageGiB: 50,
+      taskRole,
       runtimePlatform: {
         cpuArchitecture: ecs.CpuArchitecture.X86_64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
       },
     });
-
-    // Grant S3 analytics bucket write access to task role
-    analyticsBucket.grantWrite(taskDefinition.taskRole);
-
-    // Grant credential sync write access to Claude credentials secret
-    claudeCredentialsSecret.grantWrite(taskDefinition.taskRole);
-
-    // Grant CodePipeline access to task role
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'codepipeline:GetPipeline',
-        'codepipeline:GetPipelineState',
-        'codepipeline:GetPipelineExecution',
-        'codepipeline:ListPipelines',
-        'codepipeline:ListPipelineExecutions',
-        'codepipeline:ListActionExecutions',
-        'codepipeline:RetryStageExecution',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant CodeBuild update access for managing build projects
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'codebuild:UpdateProject',
-        'codebuild:BatchGetProjects',
-      ],
-      resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/pnyx-*`],
-    }));
-
-    // Grant scoped IAM policy management for pnyx roles
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'iam:PutRolePolicy',
-        'iam:GetRolePolicy',
-      ],
-      resources: [`arn:aws:iam::${this.account}:role/pnyx-*`],
-    }));
-
-    // Grant iam:PassRole for pnyx ECS task definition registration
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['iam:PassRole'],
-      resources: [
-        `arn:aws:iam::${this.account}:role/pnyx-dev-ecs-exec`,
-        `arn:aws:iam::${this.account}:role/pnyx-dev-ecs-task`,
-      ],
-    }));
-
-    // Grant ECS task definition permissions (inspect and update task definitions)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'ecs:DescribeTaskDefinition',
-        'ecs:RegisterTaskDefinition',
-        'ecs:ListTaskDefinitions',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant ECS service management permissions (update services, inspect tasks)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'ecs:UpdateService',
-        'ecs:DescribeServices',
-        'ecs:ListTasks',
-        'ecs:DescribeTasks',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant Cognito permissions (look up user pools and create app clients)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'cognito-idp:ListUserPools',
-        'cognito-idp:DescribeUserPool',
-        'cognito-idp:DescribeUserPoolClient',
-        'cognito-idp:ListUserPoolClients',
-        'cognito-idp:CreateUserPoolClient',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant ELB access to task role
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'elasticloadbalancing:DescribeLoadBalancers',
-        'elasticloadbalancing:DescribeListeners',
-        'elasticloadbalancing:DescribeRules',
-        'elasticloadbalancing:DescribeTargetGroups',
-        'elasticloadbalancing:DescribeTargetHealth',
-        'elasticloadbalancing:DeleteRule',
-        'elasticloadbalancing:CreateRule',
-        'elasticloadbalancing:AddTags',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant SSM write access for Pnyx
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['ssm:PutParameter'],
-      resources: ['arn:aws:ssm:*:*:parameter/pnyx/dev/*'],
-    }));
-
-    // Grant Secrets Manager access for Pnyx
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'secretsmanager:CreateSecret',
-        'secretsmanager:PutSecretValue',
-      ],
-      resources: ['arn:aws:secretsmanager:*:*:secret:pnyx/dev/*'],
-    }));
-
-    // Grant Cognito UpdateUserPoolClient
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['cognito-idp:UpdateUserPoolClient'],
-      resources: ['*'],
-    }));
-
-    // Grant KMS encrypt for SSM SecureString parameters
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['kms:Encrypt'],
-      resources: ['*'],
-      conditions: {
-        StringEquals: {
-          'kms:ViaService': 'ssm.us-east-1.amazonaws.com',
-        },
-      },
-    }));
-
-    // Grant ECS service management (deploy task definition updates)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'ecs:UpdateService',
-        'ecs:DescribeServices',
-        'ecs:ListServices',
-        'ecs:ListTasks',
-        'ecs:DescribeTasks',
-        'ecs:ListClusters',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant RDS full management for pnyx instances
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'rds:CreateDBInstance',
-        'rds:DescribeDBInstances',
-        'rds:ModifyDBInstance',
-        'rds:AddTagsToResource',
-        'rds:ListTagsForResource',
-      ],
-      resources: [
-        `arn:aws:rds:${this.region}:${this.account}:db:pnyx-*`,
-      ],
-    }));
-
-    // Grant RDS supporting resource management (subnet groups, parameter groups)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'rds:CreateDBSubnetGroup',
-        'rds:DescribeDBSubnetGroups',
-        'rds:CreateDBParameterGroup',
-        'rds:DescribeDBParameterGroups',
-        'rds:ModifyDBParameterGroup',
-        'rds:DescribeDBEngineVersions',
-        'rds:DescribeOrderableDBInstanceOptions',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant EC2 permissions for VPC/subnet/security group operations
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'ec2:DescribeSubnets',
-        'ec2:DescribeVpcs',
-        'ec2:DescribeSecurityGroups',
-        'ec2:CreateSecurityGroup',
-        'ec2:AuthorizeSecurityGroupIngress',
-        'ec2:AuthorizeSecurityGroupEgress',
-        'ec2:RevokeSecurityGroupEgress',
-        'ec2:CreateTags',
-        'ec2:DescribeNetworkInterfaces',
-        'ec2:DescribeAvailabilityZones',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant Cognito user/pool management (create pools, manage users)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'cognito-idp:CreateUserPool',
-        'cognito-idp:AdminCreateUser',
-        'cognito-idp:AdminSetUserPassword',
-        'cognito-idp:ListUsers',
-      ],
-      resources: ['*'],
-    }));
-
-    // Grant SSM read access for Pnyx (verify parameter values)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'ssm:GetParameter',
-        'ssm:GetParameters',
-        'ssm:DescribeParameters',
-        'ssm:DeleteParameter',
-      ],
-      resources: ['arn:aws:ssm:*:*:parameter/pnyx/dev/*'],
-    }));
-
-    // Grant Secrets Manager read access for Pnyx (verify secret values)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'secretsmanager:GetSecretValue',
-        'secretsmanager:DescribeSecret',
-        'secretsmanager:ListSecrets',
-        'secretsmanager:DeleteSecret',
-      ],
-      resources: ['arn:aws:secretsmanager:*:*:secret:pnyx/dev/*'],
-    }));
-
-    // Grant CodePipeline start (trigger deployments)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['codepipeline:StartPipelineExecution'],
-      resources: [`arn:aws:codepipeline:${this.region}:${this.account}:pnyx-*`],
-    }));
-
-    // Grant CloudWatch Logs read access (debug ECS tasks)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: [
-        'logs:GetLogEvents',
-        'logs:FilterLogEvents',
-        'logs:DescribeLogStreams',
-        'logs:DescribeLogGroups',
-      ],
-      resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/ecs/pnyx-*:*`],
-    }));
-
-    // Grant CloudFormation full access (manage CDK stacks)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['cloudformation:*'],
-      resources: ['*'],
-    }));
-
-    // Grant ability to assume CDK bootstrap roles (deploy/destroy stacks)
-    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['sts:AssumeRole'],
-      resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
-    }));
 
     // Log group
     const logGroup = new logs.LogGroup(this, 'FrankLogs', {
