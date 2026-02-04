@@ -409,14 +409,21 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
     import tempfile
 
     try:
-        # Clear any existing input first to avoid appending to user's in-progress text
-        # Send Escape (cancel any input mode) then Ctrl+U (clear line)
+        # Save user's current input to kill ring, then restore after sending timed prompt
+        # This preserves any text the user was typing when the timed prompt fires
+        # Escape: cancel any input mode
+        # Ctrl+A: go to beginning of line
+        # Ctrl+K: cut to end of line (saves to terminal kill ring)
         subprocess.run(
             ['tmux', 'send-keys', '-t', session, 'Escape'],
             capture_output=True, text=True, timeout=5
         )
         subprocess.run(
-            ['tmux', 'send-keys', '-t', session, 'C-u'],
+            ['tmux', 'send-keys', '-t', session, 'C-a'],
+            capture_output=True, text=True, timeout=5
+        )
+        subprocess.run(
+            ['tmux', 'send-keys', '-t', session, 'C-k'],
             capture_output=True, text=True, timeout=5
         )
 
@@ -425,7 +432,7 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
             f.write(text)
             tmp_path = f.name
 
-        # Load into tmux paste buffer
+        # Load into tmux paste buffer (separate from terminal kill ring)
         result = subprocess.run(
             ['tmux', 'load-buffer', tmp_path],
             capture_output=True, text=True, timeout=5
@@ -454,6 +461,13 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
             )
             if result.returncode != 0:
                 log(f"tmux send-keys Enter failed: {result.stderr}")
+
+            # Restore user's original text from kill ring (Ctrl+Y yanks it back)
+            # This way the user can continue typing where they left off
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'C-y'],
+                capture_output=True, text=True, timeout=5
+            )
 
         log(f"Sent {len(text)} chars to tmux session '{session}' (auto_submit={auto_submit})")
         return True
