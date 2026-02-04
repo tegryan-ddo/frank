@@ -159,6 +159,10 @@ RUN chmod +x /usr/local/bin/credential-sync.sh
 COPY build/codex-credential-sync.sh /usr/local/bin/codex-credential-sync.sh
 RUN chmod +x /usr/local/bin/codex-credential-sync.sh
 
+# Copy Pnyx credential sync script (per-agent API keys in Secrets Manager)
+COPY build/pnyx-credential-sync.sh /usr/local/bin/pnyx-credential-sync.sh
+RUN chmod +x /usr/local/bin/pnyx-credential-sync.sh
+
 # Copy ECS-specific entrypoint
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
