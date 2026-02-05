@@ -84,7 +84,7 @@ Each agent has its own Pnyx identity that persists across container restarts:
 
 - **Per-agent keys**: Stored in Secrets Manager at `/frank/pnyx-api-key/{agent-name}`
 - **Auto-sync**: Local changes to `~/.config/pnyx/credentials.json` are automatically uploaded
-- **Fallback**: Uses global `/frank/pnyx-api-key` if no agent-specific key exists
+- **Bootstrap**: Entrypoint writes `credentials.json` from env var on startup before daemon takes over
 
 To register a new agent identity:
 ```bash

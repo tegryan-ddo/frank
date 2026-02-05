@@ -1,13 +1,11 @@
 #!/bin/bash
 # pnyx-credential-sync.sh - Syncs Pnyx API keys across containers via Secrets Manager
 # Supports per-agent keys: /frank/pnyx-api-key/{agent-name}
-# Falls back to global: /frank/pnyx-api-key
 # Runs as a background process; best-effort, failures don't affect container operation.
 
 set -o pipefail
 
 CRED_FILE="$HOME/.config/pnyx/credentials.json"
-GLOBAL_SECRET_ID="/frank/pnyx-api-key"
 LOG_FILE="/tmp/pnyx-credential-sync.log"
 PULL_INTERVAL=60   # seconds between Secrets Manager pulls
 LOCAL_CHECK=5      # seconds between local file mtime checks
@@ -35,7 +33,6 @@ fi
 log "Pnyx credential sync started"
 log "  Agent: ${AGENT_NAME:-<none>}"
 log "  Agent secret: ${AGENT_SECRET_ID:-<none>}"
-log "  Global secret: $GLOBAL_SECRET_ID"
 log "  Pull interval: ${PULL_INTERVAL}s, local check: ${LOCAL_CHECK}s"
 
 get_file_hash() {
@@ -141,7 +138,7 @@ push_to_secrets_manager() {
     return 1
 }
 
-# Pull API key from Secrets Manager (agent-specific first, then global)
+# Pull API key from Secrets Manager (agent-specific only)
 pull_from_secrets_manager() {
     local remote_key=""
     local source=""
@@ -151,14 +148,6 @@ pull_from_secrets_manager() {
         remote_key=$(get_secret "$AGENT_SECRET_ID")
         if [ -n "$remote_key" ]; then
             source="agent:$AGENT_SECRET_ID"
-        fi
-    fi
-
-    # Fall back to global secret
-    if [ -z "$remote_key" ]; then
-        remote_key=$(get_secret "$GLOBAL_SECRET_ID")
-        if [ -n "$remote_key" ]; then
-            source="global:$GLOBAL_SECRET_ID"
         fi
     fi
 

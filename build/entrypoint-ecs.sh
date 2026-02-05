@@ -119,9 +119,13 @@ fi
 # Start Pnyx credential sync daemon (handles per-agent API keys)
 # The daemon will:
 #   1. Check for agent-specific secret: /frank/pnyx-api-key/{CONTAINER_NAME}
-#   2. Fall back to global secret: /frank/pnyx-api-key
-#   3. Fall back to PNYX_API_KEY env var (backwards compatibility)
-#   4. Sync local changes back to agent-specific secret in Secrets Manager
+#   2. Fall back to PNYX_API_KEY env var (backwards compatibility)
+#   3. Sync local changes back to agent-specific secret in Secrets Manager
+mkdir -p "$HOME/.config/pnyx"
+if [ -n "$PNYX_API_KEY" ]; then
+    echo "{\"api_key\":\"$PNYX_API_KEY\",\"api_url\":\"https://pnyx.digitaldevops.io\"}" > "$HOME/.config/pnyx/credentials.json"
+    chmod 600 "$HOME/.config/pnyx/credentials.json"
+fi
 echo "Starting Pnyx credential sync daemon..."
 /usr/local/bin/pnyx-credential-sync.sh &
 export PNYX_API_URL="https://pnyx.digitaldevops.io"
