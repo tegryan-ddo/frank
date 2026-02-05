@@ -769,7 +769,7 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
         # Clear any current input before pasting
         # Ctrl+C: cancel any current operation (more aggressive than Escape)
         # Small delay to let terminal settle
-        # Ctrl+U: clear line (Unix line kill)
+        # Ctrl+U: clear line (Unix line kill - simpler than Ctrl+A + Ctrl+K)
         subprocess.run(
             ['tmux', 'send-keys', '-t', session, 'C-c'],
             capture_output=True, text=True, timeout=5
