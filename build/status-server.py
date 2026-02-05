@@ -89,6 +89,24 @@ VERSION_CACHE = {
 }
 VERSION_CHECK_INTERVAL = 300  # Check for updates every 5 minutes
 
+# Pnyx Tick configuration
+OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'llama3.2')
+PNYX_API_URL = os.environ.get('PNYX_API_URL', 'https://pnyx.digitaldevops.io')
+PNYX_CREDENTIALS_FILE = os.path.expanduser('~/.config/pnyx/credentials.json')
+
+# Pnyx tick state
+pnyx_tick_state = {
+    'enabled': False,
+    'interval_seconds': 1800,  # 30 minutes default
+    'last_tick': None,
+    'next_tick': None,
+    'last_result': None,
+    'timer_thread': None,
+    'stop_event': None,
+}
+pnyx_tick_lock = threading.Lock()
+
 def log(msg):
     """Write to log file for debugging."""
     try:
@@ -96,6 +114,345 @@ def log(msg):
             f.write(f"{datetime.now().isoformat()} - {msg}\n")
     except:
         pass
+
+
+# =========================================================================
+# Pnyx Tick Functions (Ollama-powered background social participation)
+# =========================================================================
+
+def get_pnyx_credentials():
+    """Get Pnyx API credentials from file or environment."""
+    # Try environment first
+    api_key = os.environ.get('PNYX_API_KEY')
+    if api_key:
+        return {'api_key': api_key, 'api_url': PNYX_API_URL}
+
+    # Try credentials file
+    if os.path.exists(PNYX_CREDENTIALS_FILE):
+        try:
+            with open(PNYX_CREDENTIALS_FILE) as f:
+                creds = json.load(f)
+                return {
+                    'api_key': creds.get('api_key'),
+                    'api_url': creds.get('api_url', PNYX_API_URL)
+                }
+        except Exception as e:
+            log(f"Error reading Pnyx credentials: {e}")
+
+    return None
+
+
+def pnyx_api_call(endpoint, method='GET', data=None, creds=None):
+    """Make a call to the Pnyx API."""
+    import urllib.request
+    import urllib.error
+
+    if not creds:
+        creds = get_pnyx_credentials()
+    if not creds or not creds.get('api_key'):
+        return {'error': 'No Pnyx credentials configured'}
+
+    url = f"{creds['api_url']}/api/v1{endpoint}"
+    headers = {
+        'x-api-key': creds['api_key'],
+        'Content-Type': 'application/json',
+    }
+
+    try:
+        body = json.dumps(data).encode() if data else None
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        log(f"Pnyx API error {e.code}: {error_body}")
+        return {'error': f"HTTP {e.code}: {error_body}"}
+    except Exception as e:
+        log(f"Pnyx API call failed: {e}")
+        return {'error': str(e)}
+
+
+def ollama_chat(messages, model=None):
+    """Call Ollama for chat completion."""
+    import urllib.request
+    import urllib.error
+
+    model = model or OLLAMA_MODEL
+    url = f"{OLLAMA_URL}/api/chat"
+
+    payload = {
+        'model': model,
+        'messages': messages,
+        'stream': False,
+        'options': {
+            'temperature': 0.7,
+        }
+    }
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as response:
+            result = json.loads(response.read().decode())
+            return {
+                'content': result.get('message', {}).get('content', ''),
+                'model': result.get('model'),
+                'done': result.get('done', True),
+            }
+    except urllib.error.URLError as e:
+        log(f"Ollama connection failed: {e}")
+        return {'error': f"Ollama not available: {e}"}
+    except Exception as e:
+        log(f"Ollama chat failed: {e}")
+        return {'error': str(e)}
+
+
+def run_pnyx_tick():
+    """
+    Run a single Pnyx tick cycle:
+    1. Fetch notifications and trending posts
+    2. Ask Ollama to analyze and decide actions
+    3. Execute decided actions
+    4. Return summary
+    """
+    log("Running Pnyx tick...")
+
+    creds = get_pnyx_credentials()
+    if not creds:
+        return {'error': 'No Pnyx credentials configured', 'actions': []}
+
+    # Fetch data from Pnyx
+    notifications = pnyx_api_call('/notifications', creds=creds)
+    trending = pnyx_api_call('/trending?limit=10', creds=creds)
+
+    if 'error' in notifications:
+        return {'error': f"Failed to fetch notifications: {notifications['error']}", 'actions': []}
+
+    # Prepare data for Ollama
+    notif_list = notifications.get('data', {}).get('notifications', [])
+    post_list = trending.get('data', {}).get('posts', [])
+
+    # Build the prompt for Ollama
+    system_prompt = """You are an AI agent participating in Pnyx, a forum for AI agents to share patterns and discuss approaches.
+
+Your task is to analyze notifications and trending posts, then decide which (if any) deserve engagement.
+
+Rules:
+- Only engage if you can add genuine value
+- Direct mentions/replies always deserve a response
+- For other posts, only engage if relevance score >= 7
+- Maximum 3 actions per tick
+- Reactions (upvote) are low-cost, replies need substance
+
+For each item, output a JSON object with your decision. Format your final response as a JSON array of actions:
+[
+  {"action": "reply", "post_id": "xxx", "content": "Your thoughtful reply..."},
+  {"action": "upvote", "target_id": "xxx", "target_type": "post"},
+  {"action": "skip", "reason": "Not relevant enough"}
+]
+
+Actions available: reply, upvote, skip"""
+
+    # Format the data
+    data_prompt = f"""## Notifications ({len(notif_list)} items)
+"""
+    for n in notif_list[:5]:
+        data_prompt += f"- [{n.get('type', 'unknown')}] {n.get('preview', '')[:100]}... (id: {n.get('sourceId', 'unknown')})\n"
+
+    data_prompt += f"""
+## Trending Posts ({len(post_list)} items)
+"""
+    for p in post_list[:5]:
+        data_prompt += f"- \"{p.get('title', 'Untitled')}\" ({p.get('voteCount', 0)} votes, {p.get('commentCount', 0)} comments, id: {p.get('id', 'unknown')})\n"
+        body_preview = (p.get('body', '') or '')[:150]
+        if body_preview:
+            data_prompt += f"  Preview: {body_preview}...\n"
+
+    data_prompt += "\nAnalyze these items and decide on actions (max 3). Respond with JSON array only."
+
+    # Call Ollama
+    ollama_result = ollama_chat([
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': data_prompt}
+    ])
+
+    if 'error' in ollama_result:
+        return {'error': f"Ollama failed: {ollama_result['error']}", 'actions': [], 'raw_response': None}
+
+    # Parse Ollama's response
+    response_text = ollama_result.get('content', '')
+    actions_taken = []
+
+    try:
+        # Extract JSON from response (handle markdown code blocks)
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            actions = json.loads(json_match.group())
+        else:
+            actions = []
+
+        # Execute actions
+        for action in actions[:3]:  # Max 3 actions
+            action_type = action.get('action', 'skip')
+
+            if action_type == 'reply' and action.get('post_id') and action.get('content'):
+                result = pnyx_api_call(
+                    f"/posts/{action['post_id']}/comments",
+                    method='POST',
+                    data={'content': action['content']},
+                    creds=creds
+                )
+                actions_taken.append({
+                    'type': 'reply',
+                    'post_id': action['post_id'],
+                    'success': 'error' not in result,
+                    'preview': action['content'][:50] + '...' if len(action['content']) > 50 else action['content']
+                })
+
+            elif action_type == 'upvote' and action.get('target_id'):
+                result = pnyx_api_call(
+                    '/votes',
+                    method='POST',
+                    data={
+                        'targetId': action['target_id'],
+                        'targetType': action.get('target_type', 'post'),
+                        'value': 1
+                    },
+                    creds=creds
+                )
+                actions_taken.append({
+                    'type': 'upvote',
+                    'target_id': action['target_id'],
+                    'success': 'error' not in result
+                })
+
+            elif action_type == 'skip':
+                actions_taken.append({
+                    'type': 'skip',
+                    'reason': action.get('reason', 'No action needed')
+                })
+
+    except json.JSONDecodeError as e:
+        log(f"Failed to parse Ollama response: {e}")
+        log(f"Raw response: {response_text}")
+        return {
+            'error': 'Failed to parse Ollama response',
+            'actions': [],
+            'raw_response': response_text[:500]
+        }
+
+    result = {
+        'timestamp': datetime.now().isoformat(),
+        'notifications_checked': len(notif_list),
+        'posts_checked': len(post_list),
+        'actions': actions_taken,
+        'model': ollama_result.get('model', OLLAMA_MODEL),
+    }
+
+    log(f"Pnyx tick completed: {len(actions_taken)} actions taken")
+    return result
+
+
+def pnyx_tick_timer_loop(stop_event, interval_seconds):
+    """Background timer loop for Pnyx tick."""
+    while not stop_event.is_set():
+        # Wait for interval or stop signal
+        if stop_event.wait(timeout=interval_seconds):
+            break  # Stop event was set
+
+        # Run tick
+        try:
+            result = run_pnyx_tick()
+            with pnyx_tick_lock:
+                pnyx_tick_state['last_tick'] = datetime.now().isoformat()
+                pnyx_tick_state['last_result'] = result
+                pnyx_tick_state['next_tick'] = (
+                    datetime.now().timestamp() + pnyx_tick_state['interval_seconds']
+                )
+        except Exception as e:
+            log(f"Pnyx tick error: {e}")
+            with pnyx_tick_lock:
+                pnyx_tick_state['last_result'] = {'error': str(e), 'actions': []}
+
+    log("Pnyx tick timer stopped")
+
+
+def start_pnyx_tick_timer(interval_seconds=1800):
+    """Start the Pnyx tick background timer."""
+    global pnyx_tick_state
+
+    with pnyx_tick_lock:
+        # Stop existing timer if running
+        if pnyx_tick_state['timer_thread'] and pnyx_tick_state['timer_thread'].is_alive():
+            pnyx_tick_state['stop_event'].set()
+            pnyx_tick_state['timer_thread'].join(timeout=5)
+
+        # Create new timer
+        stop_event = threading.Event()
+        timer_thread = threading.Thread(
+            target=pnyx_tick_timer_loop,
+            args=(stop_event, interval_seconds),
+            daemon=True
+        )
+
+        pnyx_tick_state['enabled'] = True
+        pnyx_tick_state['interval_seconds'] = interval_seconds
+        pnyx_tick_state['stop_event'] = stop_event
+        pnyx_tick_state['timer_thread'] = timer_thread
+        pnyx_tick_state['next_tick'] = datetime.now().timestamp() + interval_seconds
+
+        timer_thread.start()
+        log(f"Pnyx tick timer started (interval: {interval_seconds}s)")
+
+    return True
+
+
+def stop_pnyx_tick_timer():
+    """Stop the Pnyx tick background timer."""
+    global pnyx_tick_state
+
+    with pnyx_tick_lock:
+        if pnyx_tick_state['stop_event']:
+            pnyx_tick_state['stop_event'].set()
+
+        if pnyx_tick_state['timer_thread']:
+            pnyx_tick_state['timer_thread'].join(timeout=5)
+
+        pnyx_tick_state['enabled'] = False
+        pnyx_tick_state['timer_thread'] = None
+        pnyx_tick_state['stop_event'] = None
+        pnyx_tick_state['next_tick'] = None
+
+        log("Pnyx tick timer stopped")
+
+    return True
+
+
+def get_pnyx_tick_status():
+    """Get the current Pnyx tick timer status."""
+    with pnyx_tick_lock:
+        status = {
+            'enabled': pnyx_tick_state['enabled'],
+            'interval_seconds': pnyx_tick_state['interval_seconds'],
+            'last_tick': pnyx_tick_state['last_tick'],
+            'last_result': pnyx_tick_state['last_result'],
+            'has_credentials': get_pnyx_credentials() is not None,
+        }
+
+        if pnyx_tick_state['next_tick']:
+            remaining = pnyx_tick_state['next_tick'] - datetime.now().timestamp()
+            status['next_tick_in_seconds'] = max(0, int(remaining))
+        else:
+            status['next_tick_in_seconds'] = None
+
+        return status
 
 
 # =========================================================================
@@ -409,21 +766,17 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
     import tempfile
 
     try:
-        # Save user's current input to kill ring, then restore after sending timed prompt
-        # This preserves any text the user was typing when the timed prompt fires
-        # Escape: cancel any input mode
-        # Ctrl+A: go to beginning of line
-        # Ctrl+K: cut to end of line (saves to terminal kill ring)
+        # Clear any current input before pasting
+        # Ctrl+C: cancel any current operation (more aggressive than Escape)
+        # Small delay to let terminal settle
+        # Ctrl+U: clear line (Unix line kill)
         subprocess.run(
-            ['tmux', 'send-keys', '-t', session, 'Escape'],
+            ['tmux', 'send-keys', '-t', session, 'C-c'],
             capture_output=True, text=True, timeout=5
         )
+        time.sleep(0.1)  # Let terminal process the cancel
         subprocess.run(
-            ['tmux', 'send-keys', '-t', session, 'C-a'],
-            capture_output=True, text=True, timeout=5
-        )
-        subprocess.run(
-            ['tmux', 'send-keys', '-t', session, 'C-k'],
+            ['tmux', 'send-keys', '-t', session, 'C-u'],
             capture_output=True, text=True, timeout=5
         )
 
@@ -461,13 +814,8 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
             )
             if result.returncode != 0:
                 log(f"tmux send-keys Enter failed: {result.stderr}")
-
-            # Restore user's original text from kill ring (Ctrl+Y yanks it back)
-            # This way the user can continue typing where they left off
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'C-y'],
-                capture_output=True, text=True, timeout=5
-            )
+            # Note: Don't try to restore user text with Ctrl+Y after submitting,
+            # as Claude will be processing and the restore would interfere
 
         log(f"Sent {len(text)} chars to tmux session '{session}' (auto_submit={auto_submit})")
         return True
@@ -583,6 +931,16 @@ class StatusHandler(BaseHTTPRequestHandler):
                 }).encode())
                 return
 
+            # Pnyx tick endpoints
+            if path == '/status/tick':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                status = get_pnyx_tick_status()
+                self.wfile.write(json.dumps(status).encode())
+                return
+
             # Static file serving
             # Handle directory requests (serve index.html)
             if path == '/' or path == '':
@@ -662,6 +1020,74 @@ class StatusHandler(BaseHTTPRequestHandler):
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode())
+                return
+
+            elif path == '/status/tick/start':
+                # Start Pnyx tick timer
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+
+                try:
+                    data = json.loads(body) if body else {}
+                    interval = data.get('interval', 1800)  # Default 30 minutes
+
+                    # Validate interval (minimum 60 seconds, maximum 4 hours)
+                    interval = max(60, min(14400, int(interval)))
+
+                    start_pnyx_tick_timer(interval)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': True,
+                        'message': f'Pnyx tick timer started ({interval}s interval)',
+                        'status': get_pnyx_tick_status()
+                    }).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': str(e)}).encode())
+                return
+
+            elif path == '/status/tick/stop':
+                # Stop Pnyx tick timer
+                stop_pnyx_tick_timer()
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'success': True,
+                    'message': 'Pnyx tick timer stopped',
+                    'status': get_pnyx_tick_status()
+                }).encode())
+                return
+
+            elif path == '/status/tick/now':
+                # Run Pnyx tick immediately
+                def run_tick_background():
+                    result = run_pnyx_tick()
+                    with pnyx_tick_lock:
+                        pnyx_tick_state['last_tick'] = datetime.now().isoformat()
+                        pnyx_tick_state['last_result'] = result
+
+                # Run in background thread to not block the response
+                thread = threading.Thread(target=run_tick_background, daemon=True)
+                thread.start()
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'success': True,
+                    'message': 'Pnyx tick started (running in background)',
+                }).encode())
                 return
 
             elif path == '/status/heartbeat':

@@ -486,6 +486,145 @@
             gap: 8px;
         }
 
+        /* Pnyx Tick Section */
+        .pnyx-tick-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #3c3c3c;
+        }
+
+        .pnyx-tick-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            align-items: center;
+        }
+
+        .pnyx-tick-btn {
+            flex: 1;
+            padding: 8px 12px;
+            background: #1e3a1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            color: #6a9955;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .pnyx-tick-btn:hover {
+            background: #2d5a2d;
+            border-color: #6a9955;
+        }
+
+        .pnyx-tick-btn.active {
+            background: #3a1e1e;
+            color: #f44747;
+            border-color: #f44747;
+        }
+
+        .pnyx-tick-btn.active:hover {
+            background: #5a2d2d;
+        }
+
+        .pnyx-tick-btn.active .tick-icon {
+            animation: pulse-tick 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-tick {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .pnyx-tick-interval {
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            color: #d4d4d4;
+            font-size: 11px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .pnyx-tick-interval:focus {
+            border-color: #0e639c;
+        }
+
+        .pnyx-tick-interval:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pnyx-tick-now-btn {
+            padding: 6px 10px;
+            background: #0e639c;
+            border: 1px solid #0e639c;
+            border-radius: 4px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+
+        .pnyx-tick-now-btn:hover {
+            background: #1177bb;
+        }
+
+        .pnyx-tick-now-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pnyx-tick-status {
+            margin-top: 10px;
+            font-size: 11px;
+        }
+
+        .tick-status-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+        }
+
+        .tick-status-label {
+            color: #808080;
+        }
+
+        .tick-status-value {
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .tick-status-value.running {
+            color: #6a9955;
+        }
+
+        .tick-status-value.stopped {
+            color: #808080;
+        }
+
+        .pnyx-tick-no-creds {
+            margin-top: 8px;
+            padding: 8px;
+            background: #3d3d00;
+            border: 1px solid #dcdcaa;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #dcdcaa;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pnyx-tick-no-creds .warning-icon {
+            font-size: 14px;
+        }
+
         /* Feedback Section */
         .feedback-section {
             margin-top: 16px;
@@ -1197,6 +1336,46 @@
                     <ul class="context-file-list" id="context-file-list">
                         <li class="context-empty">No files detected</li>
                     </ul>
+                </div>
+
+                <!-- Pnyx Tick Section -->
+                <div class="context-section pnyx-tick-section">
+                    <div class="context-section-title">Pnyx Tick</div>
+                    <div class="pnyx-tick-controls">
+                        <button class="pnyx-tick-btn" id="pnyx-tick-toggle" title="Start/Stop automatic Pnyx participation">
+                            <span class="tick-icon">&#x25B6;</span>
+                            <span class="tick-label">Start</span>
+                        </button>
+                        <select id="pnyx-tick-interval" class="pnyx-tick-interval" title="Tick interval">
+                            <option value="300">5m</option>
+                            <option value="900">15m</option>
+                            <option value="1800" selected>30m</option>
+                            <option value="3600">1h</option>
+                            <option value="7200">2h</option>
+                            <option value="14400">4h</option>
+                        </select>
+                        <button class="pnyx-tick-now-btn" id="pnyx-tick-now" title="Run tick now">
+                            Now
+                        </button>
+                    </div>
+                    <div class="pnyx-tick-status" id="pnyx-tick-status">
+                        <div class="tick-status-row">
+                            <span class="tick-status-label">Status:</span>
+                            <span class="tick-status-value" id="tick-status-text">Stopped</span>
+                        </div>
+                        <div class="tick-status-row" id="tick-next-row" style="display: none;">
+                            <span class="tick-status-label">Next:</span>
+                            <span class="tick-status-value" id="tick-next-time">-</span>
+                        </div>
+                        <div class="tick-status-row" id="tick-last-row" style="display: none;">
+                            <span class="tick-status-label">Last:</span>
+                            <span class="tick-status-value" id="tick-last-result">-</span>
+                        </div>
+                    </div>
+                    <div class="pnyx-tick-no-creds" id="pnyx-no-creds" style="display: none;">
+                        <span class="warning-icon">&#x26A0;</span>
+                        No Pnyx credentials found
+                    </div>
                 </div>
 
                 <!-- Feedback Section -->
@@ -1997,6 +2176,169 @@
 
             // Initial check
             handleResize();
+        })();
+
+        // =============================================
+        // Pnyx Tick Controls
+        // =============================================
+        (function() {
+            const toggleBtn = document.getElementById('pnyx-tick-toggle');
+            const intervalSelect = document.getElementById('pnyx-tick-interval');
+            const nowBtn = document.getElementById('pnyx-tick-now');
+            const statusText = document.getElementById('tick-status-text');
+            const nextRow = document.getElementById('tick-next-row');
+            const nextTime = document.getElementById('tick-next-time');
+            const lastRow = document.getElementById('tick-last-row');
+            const lastResult = document.getElementById('tick-last-result');
+            const noCreds = document.getElementById('pnyx-no-creds');
+
+            let isRunning = false;
+            let pollInterval = null;
+
+            function formatTimeRemaining(seconds) {
+                if (seconds <= 0) return 'now';
+                const m = Math.floor(seconds / 60);
+                const s = seconds % 60;
+                if (m > 0) return `${m}m ${s}s`;
+                return `${s}s`;
+            }
+
+            function formatLastResult(result) {
+                if (!result) return '-';
+                if (result.error) return `Error: ${result.error.substring(0, 30)}...`;
+                const actions = result.actions || [];
+                const actionCount = actions.filter(a => a.type !== 'skip').length;
+                if (actionCount === 0) return 'No actions taken';
+                return `${actionCount} action${actionCount !== 1 ? 's' : ''} taken`;
+            }
+
+            function updateUI(status) {
+                isRunning = status.enabled;
+
+                // Update button state
+                if (isRunning) {
+                    toggleBtn.classList.add('active');
+                    toggleBtn.querySelector('.tick-icon').textContent = '\u25A0'; // Stop icon
+                    toggleBtn.querySelector('.tick-label').textContent = 'Stop';
+                    intervalSelect.disabled = true;
+                    statusText.textContent = 'Running';
+                    statusText.className = 'tick-status-value running';
+                } else {
+                    toggleBtn.classList.remove('active');
+                    toggleBtn.querySelector('.tick-icon').textContent = '\u25B6'; // Play icon
+                    toggleBtn.querySelector('.tick-label').textContent = 'Start';
+                    intervalSelect.disabled = false;
+                    statusText.textContent = 'Stopped';
+                    statusText.className = 'tick-status-value stopped';
+                }
+
+                // Update next tick time
+                if (status.next_tick_in_seconds !== null && status.next_tick_in_seconds !== undefined) {
+                    nextRow.style.display = 'flex';
+                    nextTime.textContent = formatTimeRemaining(status.next_tick_in_seconds);
+                } else {
+                    nextRow.style.display = 'none';
+                }
+
+                // Update last result
+                if (status.last_result) {
+                    lastRow.style.display = 'flex';
+                    lastResult.textContent = formatLastResult(status.last_result);
+                    lastResult.title = JSON.stringify(status.last_result, null, 2);
+                } else {
+                    lastRow.style.display = 'none';
+                }
+
+                // Show/hide credentials warning
+                if (!status.has_credentials) {
+                    noCreds.style.display = 'flex';
+                    toggleBtn.disabled = true;
+                    nowBtn.disabled = true;
+                } else {
+                    noCreds.style.display = 'none';
+                    toggleBtn.disabled = false;
+                    nowBtn.disabled = false;
+                }
+            }
+
+            async function fetchStatus() {
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/tick');
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const status = await response.json();
+                        updateUI(status);
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch tick status:', e);
+                }
+            }
+
+            async function startTick() {
+                const interval = parseInt(intervalSelect.value, 10);
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/tick/start');
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ interval }),
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        updateUI(data.status);
+                    }
+                } catch (e) {
+                    console.error('Failed to start tick:', e);
+                }
+            }
+
+            async function stopTick() {
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/tick/stop');
+                    const response = await fetch(url, { method: 'POST' });
+                    if (response.ok) {
+                        const data = await response.json();
+                        updateUI(data.status);
+                    }
+                } catch (e) {
+                    console.error('Failed to stop tick:', e);
+                }
+            }
+
+            async function runNow() {
+                nowBtn.disabled = true;
+                nowBtn.textContent = '...';
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/tick/now');
+                    const response = await fetch(url, { method: 'POST' });
+                    if (response.ok) {
+                        // Poll for result after a short delay
+                        setTimeout(fetchStatus, 3000);
+                    }
+                } catch (e) {
+                    console.error('Failed to run tick:', e);
+                } finally {
+                    setTimeout(() => {
+                        nowBtn.disabled = false;
+                        nowBtn.textContent = 'Now';
+                    }, 2000);
+                }
+            }
+
+            // Event handlers
+            toggleBtn.addEventListener('click', () => {
+                if (isRunning) {
+                    stopTick();
+                } else {
+                    startTick();
+                }
+            });
+
+            nowBtn.addEventListener('click', runNow);
+
+            // Initial fetch and polling
+            fetchStatus();
+            pollInterval = setInterval(fetchStatus, 10000); // Poll every 10 seconds
         })();
 
         // Feedback handling
