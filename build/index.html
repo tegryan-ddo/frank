@@ -1413,6 +1413,10 @@
                             <span class="tick-status-label">Status:</span>
                             <span class="tick-status-value" id="tick-status-text">Stopped</span>
                         </div>
+                        <div class="tick-status-row">
+                            <span class="tick-status-label">Claude:</span>
+                            <span class="tick-status-value" id="tick-claude-state">-</span>
+                        </div>
                         <div class="tick-status-row" id="tick-next-row" style="display: none;">
                             <span class="tick-status-label">Next:</span>
                             <span class="tick-status-value" id="tick-next-time">-</span>
@@ -1873,11 +1877,17 @@
                 }
             }
 
-            // Send heartbeat to keep user active
+            // Send heartbeat to keep user active (includes prompt textbox state)
             async function sendHeartbeat() {
                 try {
                     const heartbeatUrl = STATUS_URL.replace('/status', '/status/heartbeat');
-                    const response = await fetch(heartbeatUrl, { method: 'POST' });
+                    const promptTextarea = document.getElementById('prompt-bubble-text');
+                    const promptHasText = promptTextarea ? promptTextarea.value.trim().length > 0 : false;
+                    const response = await fetch(heartbeatUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ promptHasText }),
+                    });
                     if (response.ok) {
                         const data = await response.json();
                         console.log('Heartbeat sent, active users:', data.active_users);
@@ -2331,6 +2341,7 @@
             const intervalSelect = document.getElementById('pnyx-tick-interval');
             const nowBtn = document.getElementById('pnyx-tick-now');
             const statusText = document.getElementById('tick-status-text');
+            const claudeState = document.getElementById('tick-claude-state');
             const nextRow = document.getElementById('tick-next-row');
             const nextTime = document.getElementById('tick-next-time');
             const lastRow = document.getElementById('tick-last-row');
@@ -2350,7 +2361,11 @@
 
             function formatLastResult(result) {
                 if (!result) return '-';
-                if (result.error) return `Error: ${result.error.substring(0, 30)}...`;
+                if (result.error) return `Error: ${result.error.substring(0, 40)}`;
+                if (result.skipped) return `Skipped: ${result.reason || 'busy'}`;
+                if (result.sent) return `Sent ${result.prompt || '/pnyx'} to Claude`;
+                if (result.sent === false && !result.skipped) return 'Failed to send';
+                // Legacy format (Ollama-based)
                 const actions = result.actions || [];
                 const actionCount = actions.filter(a => a.type !== 'skip').length;
                 if (actionCount === 0) return 'No actions taken';
@@ -2392,6 +2407,24 @@
                     lastResult.title = JSON.stringify(status.last_result, null, 2);
                 } else {
                     lastRow.style.display = 'none';
+                }
+
+                // Update Claude state
+                if (status.claude_state) {
+                    const cs = status.claude_state;
+                    if (cs.ready_for_tick) {
+                        claudeState.textContent = 'Idle';
+                        claudeState.className = 'tick-status-value running';
+                    } else if (!cs.idle) {
+                        claudeState.textContent = 'Busy';
+                        claudeState.className = 'tick-status-value stopped';
+                    } else {
+                        claudeState.textContent = 'Idle (prompt has text)';
+                        claudeState.className = 'tick-status-value';
+                    }
+                } else {
+                    claudeState.textContent = '-';
+                    claudeState.className = 'tick-status-value';
                 }
 
                 // Show/hide credentials warning
