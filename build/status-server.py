@@ -89,9 +89,7 @@ VERSION_CACHE = {
 }
 VERSION_CHECK_INTERVAL = 300  # Check for updates every 5 minutes
 
-# Pnyx Tick configuration
-OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
-OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'llama3.2')
+# Pnyx configuration
 PNYX_API_URL = os.environ.get('PNYX_API_URL', 'https://pnyx.digitaldevops.io')
 PNYX_CREDENTIALS_FILE = os.path.expanduser('~/.config/pnyx/credentials.json')
 
@@ -107,6 +105,13 @@ pnyx_tick_state = {
 }
 pnyx_tick_lock = threading.Lock()
 
+# Prompt textbox state (reported by web UI)
+prompt_textbox_state = {
+    'has_text': False,
+    'last_updated': None,
+}
+prompt_textbox_lock = threading.Lock()
+
 def log(msg):
     """Write to log file for debugging."""
     try:
@@ -117,8 +122,81 @@ def log(msg):
 
 
 # =========================================================================
-# Pnyx Tick Functions (Ollama-powered background social participation)
+# Claude Idle Detection
 # =========================================================================
+
+def is_claude_idle(session='frank-claude'):
+    """
+    Check if Claude Code is idle (waiting for user input) by inspecting
+    the tmux pane content. When idle, Claude shows the ❯ prompt character.
+    When busy, it shows a spinner like ✽ Ionizing... or streaming output.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ['tmux', 'capture-pane', '-t', session, '-p'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            log(f"tmux capture-pane failed: {result.stderr}")
+            return False
+
+        pane_content = result.stdout
+        if not pane_content.strip():
+            return False
+
+        # Get the last non-empty lines
+        lines = [l for l in pane_content.split('\n') if l.strip()]
+        if not lines:
+            return False
+
+        # Look for the idle prompt pattern in the last several lines
+        # When idle, Claude shows: ❯ (with optional trailing space)
+        # The prompt is typically near the bottom, surrounded by dash lines
+        last_lines = lines[-8:]  # Check last 8 lines
+        for line in last_lines:
+            stripped = line.strip()
+            # The idle prompt is just ❯ possibly with trailing whitespace
+            if stripped == '❯' or stripped == '❯ ':
+                return True
+
+        return False
+
+    except Exception as e:
+        log(f"Error checking Claude idle state: {e}")
+        return False
+
+
+def is_prompt_textbox_empty():
+    """Check if the web UI prompt textbox is empty (based on last reported state)."""
+    with prompt_textbox_lock:
+        # If we haven't heard from the UI in 30 seconds, assume empty
+        # (user may not have the page open)
+        if prompt_textbox_state['last_updated'] is None:
+            return True
+        age = time.time() - prompt_textbox_state['last_updated']
+        if age > 30:
+            return True
+        return not prompt_textbox_state['has_text']
+
+
+def get_claude_state(session='frank-claude'):
+    """Get Claude's current state as a dict."""
+    idle = is_claude_idle(session)
+    prompt_empty = is_prompt_textbox_empty()
+    return {
+        'idle': idle,
+        'prompt_empty': prompt_empty,
+        'ready_for_tick': idle and prompt_empty,
+    }
+
+
+# =========================================================================
+# Pnyx Tick Functions (sends /pnyx to Claude when idle)
+# =========================================================================
+
+PNYX_TICK_PROMPT = '/pnyx'  # The skill command to send to Claude
 
 def get_pnyx_credentials():
     """Get Pnyx API credentials from file or environment."""
@@ -142,221 +220,60 @@ def get_pnyx_credentials():
     return None
 
 
-def pnyx_api_call(endpoint, method='GET', data=None, creds=None):
-    """Make a call to the Pnyx API."""
-    import urllib.request
-    import urllib.error
-
-    if not creds:
-        creds = get_pnyx_credentials()
-    if not creds or not creds.get('api_key'):
-        return {'error': 'No Pnyx credentials configured'}
-
-    url = f"{creds['api_url']}/api/v1{endpoint}"
-    headers = {
-        'x-api-key': creds['api_key'],
-        'Content-Type': 'application/json',
-    }
-
-    try:
-        body = json.dumps(data).encode() if data else None
-        req = urllib.request.Request(url, data=body, headers=headers, method=method)
-
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode())
-            return result
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode() if e.fp else str(e)
-        log(f"Pnyx API error {e.code}: {error_body}")
-        return {'error': f"HTTP {e.code}: {error_body}"}
-    except Exception as e:
-        log(f"Pnyx API call failed: {e}")
-        return {'error': str(e)}
-
-
-def ollama_chat(messages, model=None):
-    """Call Ollama for chat completion."""
-    import urllib.request
-    import urllib.error
-
-    model = model or OLLAMA_MODEL
-    url = f"{OLLAMA_URL}/api/chat"
-
-    payload = {
-        'model': model,
-        'messages': messages,
-        'stream': False,
-        'options': {
-            'temperature': 0.7,
-        }
-    }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-
-        with urllib.request.urlopen(req, timeout=120) as response:
-            result = json.loads(response.read().decode())
-            return {
-                'content': result.get('message', {}).get('content', ''),
-                'model': result.get('model'),
-                'done': result.get('done', True),
-            }
-    except urllib.error.URLError as e:
-        log(f"Ollama connection failed: {e}")
-        return {'error': f"Ollama not available: {e}"}
-    except Exception as e:
-        log(f"Ollama chat failed: {e}")
-        return {'error': str(e)}
-
-
 def run_pnyx_tick():
     """
     Run a single Pnyx tick cycle:
-    1. Fetch notifications and trending posts
-    2. Ask Ollama to analyze and decide actions
-    3. Execute decided actions
-    4. Return summary
+    1. Check if Claude is idle and prompt textbox is empty
+    2. If ready, send /pnyx to Claude's tmux session
+    3. Return summary of what happened
     """
     log("Running Pnyx tick...")
 
+    # Check credentials first
     creds = get_pnyx_credentials()
     if not creds:
-        return {'error': 'No Pnyx credentials configured', 'actions': []}
+        return {'error': 'No Pnyx credentials configured', 'sent': False}
 
-    # Fetch data from Pnyx
-    notifications = pnyx_api_call('/notifications', creds=creds)
-    trending = pnyx_api_call('/trending?limit=10', creds=creds)
+    # Check if Claude is ready
+    state = get_claude_state()
 
-    if 'error' in notifications:
-        return {'error': f"Failed to fetch notifications: {notifications['error']}", 'actions': []}
-
-    # Prepare data for Ollama
-    notif_list = notifications.get('data', {}).get('notifications', [])
-    post_list = trending.get('data', {}).get('posts', [])
-
-    # Build the prompt for Ollama
-    system_prompt = """You are an AI agent participating in Pnyx, a forum for AI agents to share patterns and discuss approaches.
-
-Your task is to analyze notifications and trending posts, then decide which (if any) deserve engagement.
-
-Rules:
-- Only engage if you can add genuine value
-- Direct mentions/replies always deserve a response
-- For other posts, only engage if relevance score >= 7
-- Maximum 3 actions per tick
-- Reactions (upvote) are low-cost, replies need substance
-
-For each item, output a JSON object with your decision. Format your final response as a JSON array of actions:
-[
-  {"action": "reply", "post_id": "xxx", "content": "Your thoughtful reply..."},
-  {"action": "upvote", "target_id": "xxx", "target_type": "post"},
-  {"action": "skip", "reason": "Not relevant enough"}
-]
-
-Actions available: reply, upvote, skip"""
-
-    # Format the data
-    data_prompt = f"""## Notifications ({len(notif_list)} items)
-"""
-    for n in notif_list[:5]:
-        data_prompt += f"- [{n.get('type', 'unknown')}] {n.get('preview', '')[:100]}... (id: {n.get('sourceId', 'unknown')})\n"
-
-    data_prompt += f"""
-## Trending Posts ({len(post_list)} items)
-"""
-    for p in post_list[:5]:
-        data_prompt += f"- \"{p.get('title', 'Untitled')}\" ({p.get('voteCount', 0)} votes, {p.get('commentCount', 0)} comments, id: {p.get('id', 'unknown')})\n"
-        body_preview = (p.get('body', '') or '')[:150]
-        if body_preview:
-            data_prompt += f"  Preview: {body_preview}...\n"
-
-    data_prompt += "\nAnalyze these items and decide on actions (max 3). Respond with JSON array only."
-
-    # Call Ollama
-    ollama_result = ollama_chat([
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': data_prompt}
-    ])
-
-    if 'error' in ollama_result:
-        return {'error': f"Ollama failed: {ollama_result['error']}", 'actions': [], 'raw_response': None}
-
-    # Parse Ollama's response
-    response_text = ollama_result.get('content', '')
-    actions_taken = []
-
-    try:
-        # Extract JSON from response (handle markdown code blocks)
-        json_match = re.search(r'\[[\s\S]*\]', response_text)
-        if json_match:
-            actions = json.loads(json_match.group())
-        else:
-            actions = []
-
-        # Execute actions
-        for action in actions[:3]:  # Max 3 actions
-            action_type = action.get('action', 'skip')
-
-            if action_type == 'reply' and action.get('post_id') and action.get('content'):
-                result = pnyx_api_call(
-                    f"/posts/{action['post_id']}/comments",
-                    method='POST',
-                    data={'content': action['content']},
-                    creds=creds
-                )
-                actions_taken.append({
-                    'type': 'reply',
-                    'post_id': action['post_id'],
-                    'success': 'error' not in result,
-                    'preview': action['content'][:50] + '...' if len(action['content']) > 50 else action['content']
-                })
-
-            elif action_type == 'upvote' and action.get('target_id'):
-                result = pnyx_api_call(
-                    '/votes',
-                    method='POST',
-                    data={
-                        'targetId': action['target_id'],
-                        'targetType': action.get('target_type', 'post'),
-                        'value': 1
-                    },
-                    creds=creds
-                )
-                actions_taken.append({
-                    'type': 'upvote',
-                    'target_id': action['target_id'],
-                    'success': 'error' not in result
-                })
-
-            elif action_type == 'skip':
-                actions_taken.append({
-                    'type': 'skip',
-                    'reason': action.get('reason', 'No action needed')
-                })
-
-    except json.JSONDecodeError as e:
-        log(f"Failed to parse Ollama response: {e}")
-        log(f"Raw response: {response_text}")
+    if not state['idle']:
+        log("Pnyx tick skipped: Claude is busy")
         return {
-            'error': 'Failed to parse Ollama response',
-            'actions': [],
-            'raw_response': response_text[:500]
+            'timestamp': datetime.now().isoformat(),
+            'sent': False,
+            'skipped': True,
+            'reason': 'Claude is busy',
+            'claude_state': state,
         }
+
+    if not state['prompt_empty']:
+        log("Pnyx tick skipped: prompt textbox has text")
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'sent': False,
+            'skipped': True,
+            'reason': 'Prompt textbox has text',
+            'claude_state': state,
+        }
+
+    # Claude is idle and prompt is empty - send the pnyx command
+    success = send_to_tmux(PNYX_TICK_PROMPT, session='frank-claude', auto_submit=True)
 
     result = {
         'timestamp': datetime.now().isoformat(),
-        'notifications_checked': len(notif_list),
-        'posts_checked': len(post_list),
-        'actions': actions_taken,
-        'model': ollama_result.get('model', OLLAMA_MODEL),
+        'sent': success,
+        'skipped': False,
+        'prompt': PNYX_TICK_PROMPT,
+        'claude_state': state,
     }
 
-    log(f"Pnyx tick completed: {len(actions_taken)} actions taken")
+    if success:
+        log(f"Pnyx tick sent '{PNYX_TICK_PROMPT}' to Claude")
+    else:
+        log("Pnyx tick failed to send prompt to Claude")
+        result['error'] = 'Failed to send prompt to tmux'
+
     return result
 
 
@@ -931,6 +848,16 @@ class StatusHandler(BaseHTTPRequestHandler):
                 }).encode())
                 return
 
+            # Claude state endpoint
+            if path == '/status/claude-state':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                state = get_claude_state()
+                self.wfile.write(json.dumps(state).encode())
+                return
+
             # Pnyx tick endpoints
             if path == '/status/tick':
                 self.send_response(200)
@@ -938,6 +865,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 status = get_pnyx_tick_status()
+                status['claude_state'] = get_claude_state()
                 self.wfile.write(json.dumps(status).encode())
                 return
 
@@ -1092,6 +1020,19 @@ class StatusHandler(BaseHTTPRequestHandler):
 
             elif path == '/status/heartbeat':
                 # Update user's last_seen timestamp
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+                try:
+                    data = json.loads(body) if body else {}
+                except json.JSONDecodeError:
+                    data = {}
+
+                # Update prompt textbox state if provided
+                if 'promptHasText' in data:
+                    with prompt_textbox_lock:
+                        prompt_textbox_state['has_text'] = bool(data['promptHasText'])
+                        prompt_textbox_state['last_updated'] = time.time()
+
                 user_info = extract_user_from_headers(dict(self.headers))
                 if user_info:
                     update_active_user(user_info)
