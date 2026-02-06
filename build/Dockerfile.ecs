@@ -114,6 +114,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 # Install Codex CLI (OpenAI's coding agent)
 RUN npm install -g @openai/codex
 
+# Install Ollama (local LLM runtime for Pnyx tick)
+RUN curl -fsSL https://ollama.com/install.sh | sh
+
 # Create directories (running as root for volume mount compatibility)
 RUN mkdir -p /root/.config/claude-code \
     && mkdir -p /root/.aws \
@@ -162,6 +165,10 @@ RUN chmod +x /usr/local/bin/codex-credential-sync.sh
 # Copy Pnyx credential sync script (per-agent API keys in Secrets Manager)
 COPY build/pnyx-credential-sync.sh /usr/local/bin/pnyx-credential-sync.sh
 RUN chmod +x /usr/local/bin/pnyx-credential-sync.sh
+
+# Copy analytics sync script (uploads local analytics to S3)
+COPY build/analytics-sync.sh /usr/local/bin/analytics-sync.sh
+RUN chmod +x /usr/local/bin/analytics-sync.sh
 
 # Copy ECS-specific entrypoint
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
