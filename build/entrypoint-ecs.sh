@@ -131,6 +131,37 @@ echo "Starting Pnyx credential sync daemon..."
 export PNYX_API_URL="https://pnyx.digitaldevops.io"
 echo "Pnyx credential sync started for agent: ${CONTAINER_NAME:-unknown}"
 
+# Start Ollama for local LLM (used by Pnyx tick)
+# Store models on EFS so they persist across container restarts
+export OLLAMA_MODELS="/workspace/.ollama/models"
+mkdir -p "$OLLAMA_MODELS"
+if command -v ollama >/dev/null 2>&1; then
+    echo "Starting Ollama server..."
+    ollama serve >> /tmp/ollama.log 2>&1 &
+    OLLAMA_PID=$!
+    echo "Ollama server started (PID $OLLAMA_PID)"
+    # Pull default model in background (won't block container startup)
+    (
+        # Wait for Ollama to be ready
+        for i in $(seq 1 30); do
+            if curl -sf http://localhost:11434/api/version >/dev/null 2>&1; then
+                echo "Ollama ready, pulling model..." >> /tmp/ollama.log
+                ollama pull llama3.2 >> /tmp/ollama.log 2>&1 || true
+                echo "Model pull complete" >> /tmp/ollama.log
+                break
+            fi
+            sleep 2
+        done
+    ) &
+else
+    echo "WARNING: Ollama not installed - Pnyx tick AI features disabled"
+fi
+
+# Start analytics sync daemon (uploads local analytics to S3)
+echo "Starting analytics sync daemon..."
+/usr/local/bin/analytics-sync.sh &
+echo "Analytics sync started for profile: ${CONTAINER_NAME:-unknown}"
+
 # AWS credentials come automatically from ECS task IAM role
 echo "AWS credentials: using ECS task IAM role"
 echo "  Region: ${AWS_REGION:-us-east-1}"
