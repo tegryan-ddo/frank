@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim \
     tmux \
     netcat-openbsd \
+    zstd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 LTS
