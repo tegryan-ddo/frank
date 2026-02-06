@@ -1115,6 +1115,156 @@ class StatusHandler(BaseHTTPRequestHandler):
                     }).encode())
                 return
 
+            elif path == '/status/upload':
+                # Handle image file upload (multipart/form-data)
+                content_type = self.headers.get('Content-Type', '')
+                content_length = int(self.headers.get('Content-Length', 0))
+
+                # Size limit: 10MB
+                if content_length > 10 * 1024 * 1024:
+                    self.send_response(413)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'File too large (max 10MB)'}).encode())
+                    return
+
+                if 'multipart/form-data' not in content_type:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'Expected multipart/form-data'}).encode())
+                    return
+
+                try:
+                    # Parse multipart boundary
+                    boundary = None
+                    for part in content_type.split(';'):
+                        part = part.strip()
+                        if part.startswith('boundary='):
+                            boundary = part[len('boundary='):].strip('"')
+                            break
+
+                    if not boundary:
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'error': 'No boundary in Content-Type'}).encode())
+                        return
+
+                    # Read the entire body
+                    body = self.rfile.read(content_length)
+                    boundary_bytes = ('--' + boundary).encode()
+
+                    # Parse multipart parts
+                    file_data = None
+                    file_name = None
+                    auto_submit = False
+
+                    parts = body.split(boundary_bytes)
+                    for part in parts:
+                        if not part or part == b'--\r\n' or part == b'--':
+                            continue
+                        # Split headers from body at first double CRLF
+                        header_end = part.find(b'\r\n\r\n')
+                        if header_end == -1:
+                            continue
+                        headers_raw = part[:header_end].decode('utf-8', errors='replace')
+                        part_body = part[header_end + 4:]
+                        # Remove trailing \r\n
+                        if part_body.endswith(b'\r\n'):
+                            part_body = part_body[:-2]
+
+                        # Parse Content-Disposition
+                        field_name = None
+                        filename = None
+                        for hdr_line in headers_raw.split('\r\n'):
+                            if hdr_line.lower().startswith('content-disposition:'):
+                                for param in hdr_line.split(';'):
+                                    param = param.strip()
+                                    if param.startswith('name='):
+                                        field_name = param[5:].strip('"')
+                                    elif param.startswith('filename='):
+                                        filename = param[9:].strip('"')
+
+                        if field_name == 'file' and filename:
+                            file_data = part_body
+                            file_name = filename
+                        elif field_name == 'autoSubmit':
+                            auto_submit = part_body.decode('utf-8', errors='replace').strip().lower() == 'true'
+
+                    if not file_data or not file_name:
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'error': 'No file uploaded'}).encode())
+                        return
+
+                    # Validate file extension
+                    allowed_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'}
+                    ext = os.path.splitext(file_name)[1].lower()
+                    if ext not in allowed_exts:
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({
+                            'error': f'File type not allowed: {ext}. Allowed: {", ".join(sorted(allowed_exts))}'
+                        }).encode())
+                        return
+
+                    # Sanitize filename: keep only alphanumeric, dots, dashes, underscores
+                    base_name = os.path.splitext(file_name)[0]
+                    safe_base = re.sub(r'[^a-zA-Z0-9._-]', '_', base_name)
+                    if not safe_base:
+                        safe_base = 'upload'
+                    safe_filename = safe_base + ext
+
+                    # Create upload directory
+                    upload_dir = '/workspace/uploads'
+                    os.makedirs(upload_dir, exist_ok=True)
+
+                    # Handle duplicate filenames
+                    save_path = os.path.join(upload_dir, safe_filename)
+                    if os.path.exists(save_path):
+                        counter = 1
+                        while os.path.exists(save_path):
+                            save_path = os.path.join(upload_dir, f"{safe_base}_{counter}{ext}")
+                            counter += 1
+                        safe_filename = os.path.basename(save_path)
+
+                    # Save file
+                    with open(save_path, 'wb') as f:
+                        f.write(file_data)
+
+                    log(f"Uploaded file saved: {save_path} ({len(file_data)} bytes)")
+
+                    # Send file path to Claude terminal
+                    prompt_text = save_path
+                    send_to_tmux(prompt_text, 'frank-claude', auto_submit)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': True,
+                        'path': save_path,
+                        'filename': safe_filename,
+                    }).encode())
+
+                except Exception as e:
+                    log(f"Upload error: {e}")
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': str(e)}).encode())
+                return
+
             elif path == '/status/feedback':
                 # Read request body
                 content_length = int(self.headers.get('Content-Length', 0))

@@ -874,6 +874,56 @@
             opacity: 1;
         }
 
+        /* Image Upload Drop Overlay */
+        .upload-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(14, 99, 156, 0.15);
+            z-index: 9000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .upload-overlay.visible {
+            display: flex;
+            animation: upload-fade-in 0.15s ease-out;
+        }
+
+        @keyframes upload-fade-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .upload-overlay-inner {
+            border: 3px dashed #0e639c;
+            border-radius: 16px;
+            padding: 48px 64px;
+            text-align: center;
+            background: rgba(30, 30, 30, 0.92);
+        }
+
+        .upload-overlay-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .upload-overlay-text {
+            font-size: 18px;
+            font-weight: 500;
+            color: #d4d4d4;
+        }
+
+        .upload-overlay-hint {
+            font-size: 12px;
+            color: #808080;
+            margin-top: 8px;
+        }
+
         /* Update Available Indicator */
         .update-indicator {
             display: none;
@@ -1411,6 +1461,15 @@
 
         <!-- Toast notification -->
         <div class="prompt-copied-toast" id="prompt-toast"></div>
+
+        <!-- Image upload drop overlay -->
+        <div class="upload-overlay" id="upload-overlay">
+            <div class="upload-overlay-inner">
+                <div class="upload-overlay-icon">&#128247;</div>
+                <div class="upload-overlay-text">Drop image here</div>
+                <div class="upload-overlay-hint">PNG, JPG, GIF, WebP, SVG, BMP (max 10MB)</div>
+            </div>
+        </div>
 
         <!-- Floating prompt button -->
         <button class="prompt-fab" id="prompt-fab" title="Send prompt to Claude">+</button>
@@ -2114,6 +2173,92 @@
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
                     sendPrompt();
+                }
+            });
+        })();
+
+        // Image Upload Drag-and-Drop
+        (function() {
+            const overlay = document.getElementById('upload-overlay');
+            let dragCounter = 0;
+
+            function showToast(message) {
+                const toast = document.getElementById('prompt-toast');
+                toast.textContent = message;
+                toast.classList.add('visible');
+                setTimeout(() => toast.classList.remove('visible'), 3000);
+            }
+
+            document.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                dragCounter++;
+                if (dragCounter === 1) {
+                    // Only show overlay if dragging files
+                    if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+                        overlay.classList.add('visible');
+                    }
+                }
+            });
+
+            document.addEventListener('dragover', (e) => {
+                e.preventDefault();
+            });
+
+            document.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                dragCounter--;
+                if (dragCounter <= 0) {
+                    dragCounter = 0;
+                    overlay.classList.remove('visible');
+                }
+            });
+
+            document.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                dragCounter = 0;
+                overlay.classList.remove('visible');
+
+                const files = e.dataTransfer ? e.dataTransfer.files : null;
+                if (!files || files.length === 0) return;
+
+                const file = files[0]; // Handle first file only
+
+                // Validate image type
+                const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp'];
+                if (!allowedTypes.includes(file.type)) {
+                    showToast('Not an image file. Allowed: PNG, JPG, GIF, WebP, SVG, BMP');
+                    return;
+                }
+
+                // Validate size (10MB)
+                if (file.size > 10 * 1024 * 1024) {
+                    showToast('Image too large (max 10MB)');
+                    return;
+                }
+
+                showToast('Uploading ' + file.name + '...');
+
+                try {
+                    const autoSubmit = document.getElementById('prompt-auto-submit').checked;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('autoSubmit', autoSubmit.toString());
+
+                    const uploadUrl = STATUS_URL.replace('/status', '/status/upload');
+                    const response = await fetch(uploadUrl, {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    const data = await response.json();
+                    if (response.ok && data.success) {
+                        showToast('Uploaded: ' + data.filename + (autoSubmit ? ' (sent to Claude)' : ' (pasted into terminal)'));
+                    } else {
+                        showToast('Upload failed: ' + (data.error || 'Unknown error'));
+                    }
+                } catch (err) {
+                    console.error('Upload error:', err);
+                    showToast('Upload failed: ' + err.message);
                 }
             });
         })();
