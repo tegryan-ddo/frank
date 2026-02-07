@@ -2406,6 +2406,32 @@
                 }
             });
 
+            // Ctrl+V / Cmd+V: open prompt bubble and paste clipboard text
+            document.addEventListener('keydown', async (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                    // Don't intercept if focus is already in the textarea
+                    if (document.activeElement === textarea) return;
+                    e.preventDefault();
+                    try {
+                        const text = await navigator.clipboard.readText();
+                        if (!text) return;
+                        if (!bubble.classList.contains('open')) {
+                            bubble.classList.add('open');
+                            fab.textContent = '\u00D7';
+                        }
+                        // Append to existing text or set it
+                        textarea.value = textarea.value ? textarea.value + text : text;
+                        textarea.focus();
+                        // Move cursor to end
+                        textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+                        showToast('Pasted into prompt');
+                    } catch (err) {
+                        // Clipboard API may fail without permissions
+                        console.warn('Clipboard read failed:', err);
+                    }
+                }
+            });
+
             async function sendPrompt() {
                 // If timer is running, stop it
                 if (timerInterval) {
