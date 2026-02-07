@@ -51,6 +51,7 @@ interface Profile {
   branch?: string;
   description?: string;
   category?: string;
+  site_url?: string;
 }
 
 interface ProfileStatus extends Profile {
@@ -71,7 +72,7 @@ interface ApiResponse {
 const corsHeaders = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -105,6 +106,12 @@ export async function handler(event: any): Promise<ApiResponse> {
     const stopMatch = path.match(/^\/api\/profiles\/([^/]+)\/stop$/);
     if (stopMatch && method === 'POST') {
       return await stopProfile(stopMatch[1]);
+    }
+
+    const patchMatch = path.match(/^\/api\/profiles\/([^/]+)$/);
+    if (patchMatch && method === 'PATCH') {
+      const body = event.body ? JSON.parse(event.body) : {};
+      return await updateProfile(patchMatch[1], body);
     }
 
     return {
@@ -258,6 +265,39 @@ async function listProfiles(): Promise<ApiResponse> {
     statusCode: 200,
     headers: corsHeaders,
     body: JSON.stringify({ profiles: statuses }),
+  };
+}
+
+async function updateProfile(profileName: string, updates: { site_url?: string }): Promise<ApiResponse> {
+  const profiles = await getProfiles();
+  const profile = profiles.find((p) => p.name === profileName);
+
+  if (!profile) {
+    return {
+      statusCode: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: `Profile "${profileName}" not found` }),
+    };
+  }
+
+  if (updates.site_url !== undefined) {
+    profile.site_url = updates.site_url;
+  }
+
+  // Write updated profiles back to SSM
+  await ssmClient.send(
+    new PutParameterCommand({
+      Name: PROFILES_PARAM,
+      Value: JSON.stringify(profiles),
+      Type: 'String',
+      Overwrite: true,
+    })
+  );
+
+  return {
+    statusCode: 200,
+    headers: corsHeaders,
+    body: JSON.stringify({ profile }),
   };
 }
 
@@ -1203,9 +1243,11 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         const userCount = p.activeUsers || 0;
         const usersClass = userCount > 0 ? 'has-users' : 'no-users';
         const usersText = userCount > 0 ? userCount + ' online' : '-';
-        const urlCell = p.status === 'running'
-          ? '<a href="' + p.url + '" target="_blank" class="url-link">/' + p.name + '/</a>'
-          : '<span style="color: var(--text-secondary);">-</span>';
+        const siteUrl = p.site_url || '';
+        const urlCell = siteUrl
+          ? '<a href="' + siteUrl + '" target="_blank" class="url-link">' + siteUrl.replace(/^https?:\\/\\//, '') + '</a>' +
+            ' <button onclick="editSiteUrl(\\'' + p.name + '\\', \\'' + siteUrl.replace(/'/g, "\\\\'") + '\\')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:0.75rem;padding:0 0.25rem;" title="Edit URL">&#9998;</button>'
+          : '<button onclick="editSiteUrl(\\'' + p.name + '\\', \\'\\')" style="background:none;border:1px dashed var(--border);color:var(--text-secondary);cursor:pointer;font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;">Set URL</button>';
         return '<tr data-profile="' + p.name + '">' +
           '<td class="profile-name">' + p.name + '</td>' +
           '<td class="profile-desc">' + (p.description || '-') + '</td>' +
@@ -1269,6 +1311,34 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         document.getElementById('error').textContent = error.message;
         document.getElementById('error').style.display = 'block';
         fetchProfiles();
+      }
+    }
+
+    function editSiteUrl(name, currentUrl) {
+      const newUrl = prompt('Site URL for ' + name + ':', currentUrl);
+      if (newUrl === null) return; // cancelled
+      updateSiteUrl(name, newUrl);
+    }
+
+    async function updateSiteUrl(name, url) {
+      try {
+        const response = await fetch(API_BASE + '/profiles/' + name, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ site_url: url }),
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || 'Failed to update site URL');
+        }
+        // Update local state immediately
+        const p = profiles.find(p => p.name === name);
+        if (p) p.site_url = url;
+        renderProfiles();
+      } catch (error) {
+        document.getElementById('error').textContent = error.message;
+        document.getElementById('error').style.display = 'block';
       }
     }
 
