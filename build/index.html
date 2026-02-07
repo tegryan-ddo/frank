@@ -703,6 +703,41 @@
             border-color: #4ec9b0;
         }
 
+        /* Send bar below terminal */
+        .terminal-send-bar {
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            background: #252526;
+            border-top: 1px solid #3c3c3c;
+            flex-shrink: 0;
+        }
+
+        .terminal-send-bar button {
+            background: #0e639c;
+            border: none;
+            color: #fff;
+            font-size: 12px;
+            padding: 5px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+            margin-left: auto;
+        }
+
+        .terminal-send-bar button:hover {
+            background: #1177bb;
+        }
+
+        .terminal-send-bar button:active {
+            background: #0d5689;
+        }
+
+        .terminal-send-bar .send-hint {
+            font-size: 11px;
+            color: #555;
+        }
+
         /* Floating Prompt Bubble */
         .prompt-fab {
             position: fixed;
@@ -1301,6 +1336,10 @@
                     Claude Code
                 </div>
                 <iframe id="claude-frame" scrolling="no"></iframe>
+                <div class="terminal-send-bar">
+                    <span class="send-hint">Enter submits in terminal</span>
+                    <button id="claude-send-btn" title="Send Enter to Claude terminal">Send</button>
+                </div>
             </div>
 
             <div class="divider-h" id="divider"></div>
@@ -1673,6 +1712,28 @@
             STATUS_URL = `http://${window.location.hostname}:${statusPort}/status`;
         }
         console.log('STATUS_URL:', STATUS_URL, '(port:', statusPort, ')');
+
+        // Send button for Claude terminal (sends Enter keystroke)
+        (function() {
+            const sendBtn = document.getElementById('claude-send-btn');
+            sendBtn.addEventListener('click', async () => {
+                sendBtn.disabled = true;
+                try {
+                    const sendUrl = STATUS_URL.replace('/status', '/status/send-enter');
+                    const response = await fetch(sendUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session: 'frank-claude' }),
+                    });
+                    if (!response.ok) {
+                        console.error('Send failed:', response.status);
+                    }
+                } catch (e) {
+                    console.error('Send error:', e);
+                }
+                setTimeout(() => { sendBtn.disabled = false; }, 300);
+            });
+        })();
 
         function formatNumber(num) {
             if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';

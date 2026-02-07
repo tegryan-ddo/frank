@@ -905,7 +905,40 @@ class StatusHandler(BaseHTTPRequestHandler):
             if URL_PREFIX and path.startswith(URL_PREFIX):
                 path = path[len(URL_PREFIX):] or '/'
 
-            if path == '/status/send-prompt':
+            if path == '/status/send-enter':
+                # Send Enter keystroke to a tmux session
+                import subprocess
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+                try:
+                    data = json.loads(body) if body else {}
+                    session = data.get('session', 'frank-claude')
+                    if session not in ('frank-claude', 'frank-bash'):
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'error': 'Invalid session'}).encode())
+                        return
+                    result = subprocess.run(
+                        ['tmux', 'send-keys', '-t', session, 'Enter'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    success = result.returncode == 0
+                    self.send_response(200 if success else 500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'success': success}).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': str(e)}).encode())
+                return
+
+            elif path == '/status/send-prompt':
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length).decode('utf-8')
 
