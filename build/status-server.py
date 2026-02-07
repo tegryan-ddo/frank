@@ -1057,7 +1057,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 return
 
             elif path == '/status/upload':
-                # Handle image file upload (multipart/form-data)
+                # Handle file upload (multipart/form-data)
                 content_type = self.headers.get('Content-Type', '')
                 content_length = int(self.headers.get('Content-Length', 0))
 
@@ -1145,7 +1145,27 @@ class StatusHandler(BaseHTTPRequestHandler):
                         return
 
                     # Validate file extension
-                    allowed_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'}
+                    allowed_exts = {
+                        # Images
+                        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico',
+                        # Text & docs
+                        '.txt', '.md', '.csv', '.tsv', '.log', '.pdf', '.rst', '.org',
+                        # Code
+                        '.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java',
+                        '.c', '.cpp', '.h', '.hpp', '.cs', '.php', '.swift', '.kt', '.scala',
+                        '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+                        '.r', '.m', '.lua', '.pl', '.ex', '.exs', '.erl', '.hs', '.clj',
+                        # Config & data
+                        '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+                        '.xml', '.env', '.properties', '.tf', '.hcl',
+                        # Web
+                        '.html', '.htm', '.css', '.scss', '.sass', '.less',
+                        # Data & query
+                        '.sql', '.graphql', '.gql', '.proto',
+                        # Other dev files
+                        '.diff', '.patch', '.lock', '.dockerfile',
+                        '.gitignore', '.editorconfig', '.prettierrc', '.eslintrc',
+                    }
                     ext = os.path.splitext(file_name)[1].lower()
                     if ext not in allowed_exts:
                         self.send_response(400)
