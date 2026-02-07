@@ -1638,9 +1638,9 @@
         <!-- Image upload drop overlay -->
         <div class="upload-overlay" id="upload-overlay">
             <div class="upload-overlay-inner">
-                <div class="upload-overlay-icon">&#128247;</div>
-                <div class="upload-overlay-text">Drop image here</div>
-                <div class="upload-overlay-hint">PNG, JPG, GIF, WebP, SVG, BMP (max 10MB)</div>
+                <div class="upload-overlay-icon">&#128206;</div>
+                <div class="upload-overlay-text">Drop file here</div>
+                <div class="upload-overlay-hint">Images, code, text, config, data files (max 10MB)</div>
             </div>
         </div>
 
@@ -2472,10 +2472,39 @@
             });
         })();
 
-        // Image Upload Drag-and-Drop
+        // File Upload Drag-and-Drop
         (function() {
             const overlay = document.getElementById('upload-overlay');
+            const iframes = document.querySelectorAll('iframe');
             let dragCounter = 0;
+
+            // Safe file extensions for upload
+            const allowedExts = new Set([
+                // Images
+                '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico',
+                // Text & docs
+                '.txt', '.md', '.csv', '.tsv', '.log', '.pdf', '.rst', '.org',
+                // Code
+                '.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java',
+                '.c', '.cpp', '.h', '.hpp', '.cs', '.php', '.swift', '.kt', '.scala',
+                '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+                '.r', '.m', '.lua', '.pl', '.ex', '.exs', '.erl', '.hs', '.clj',
+                // Config & data
+                '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+                '.xml', '.env', '.properties', '.tf', '.hcl',
+                // Web
+                '.html', '.htm', '.css', '.scss', '.sass', '.less',
+                // Data & query
+                '.sql', '.graphql', '.gql', '.proto',
+                // Other dev files
+                '.diff', '.patch', '.lock', '.dockerfile',
+                '.gitignore', '.editorconfig', '.prettierrc', '.eslintrc',
+            ]);
+
+            function getExt(filename) {
+                const dot = filename.lastIndexOf('.');
+                return dot !== -1 ? filename.slice(dot).toLowerCase() : '';
+            }
 
             function showToast(message) {
                 const toast = document.getElementById('prompt-toast');
@@ -2484,13 +2513,21 @@
                 setTimeout(() => toast.classList.remove('visible'), 3000);
             }
 
+            // Disable pointer-events on iframes during drag so events bubble to parent
+            function disableIframes() {
+                iframes.forEach(f => f.style.pointerEvents = 'none');
+            }
+            function enableIframes() {
+                iframes.forEach(f => f.style.pointerEvents = '');
+            }
+
             document.addEventListener('dragenter', (e) => {
                 e.preventDefault();
                 dragCounter++;
                 if (dragCounter === 1) {
-                    // Only show overlay if dragging files
                     if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
                         overlay.classList.add('visible');
+                        disableIframes();
                     }
                 }
             });
@@ -2505,6 +2542,7 @@
                 if (dragCounter <= 0) {
                     dragCounter = 0;
                     overlay.classList.remove('visible');
+                    enableIframes();
                 }
             });
 
@@ -2512,22 +2550,23 @@
                 e.preventDefault();
                 dragCounter = 0;
                 overlay.classList.remove('visible');
+                enableIframes();
 
                 const files = e.dataTransfer ? e.dataTransfer.files : null;
                 if (!files || files.length === 0) return;
 
                 const file = files[0]; // Handle first file only
 
-                // Validate image type
-                const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp'];
-                if (!allowedTypes.includes(file.type)) {
-                    showToast('Not an image file. Allowed: PNG, JPG, GIF, WebP, SVG, BMP');
+                // Validate by file extension
+                const ext = getExt(file.name);
+                if (!ext || !allowedExts.has(ext)) {
+                    showToast('File type not supported: ' + (ext || 'unknown'));
                     return;
                 }
 
                 // Validate size (10MB)
                 if (file.size > 10 * 1024 * 1024) {
-                    showToast('Image too large (max 10MB)');
+                    showToast('File too large (max 10MB)');
                     return;
                 }
 
