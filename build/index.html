@@ -707,13 +707,15 @@
         .terminal-send-bar {
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 4px;
             padding: 4px 8px;
             background: #252526;
             border-top: 1px solid #3c3c3c;
             flex-shrink: 0;
         }
 
-        .terminal-send-bar button {
+        .terminal-send-bar #claude-send-btn {
             background: #0e639c;
             border: none;
             color: #fff;
@@ -725,17 +727,170 @@
             margin-left: auto;
         }
 
-        .terminal-send-bar button:hover {
+        .terminal-send-bar #claude-send-btn:hover {
             background: #1177bb;
         }
 
-        .terminal-send-bar button:active {
+        .terminal-send-bar #claude-send-btn:active {
             background: #0d5689;
         }
 
         .terminal-send-bar .send-hint {
             font-size: 11px;
             color: #555;
+        }
+
+        .custom-buttons {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .custom-btn {
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #ccc;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .custom-btn:hover {
+            background: #4a4a4a;
+            border-color: #4ec9b0;
+            color: #fff;
+        }
+
+        .custom-btn:active {
+            background: #333;
+        }
+
+        .custom-btn-config {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px 4px;
+            line-height: 1;
+            transition: color 0.15s;
+        }
+
+        .custom-btn-config:hover {
+            color: #ccc;
+        }
+
+        /* Custom Buttons Config Modal */
+        .cbtn-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .cbtn-modal-overlay.open {
+            display: flex;
+        }
+
+        .cbtn-modal {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 8px;
+            width: 420px;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        .cbtn-modal-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #3c3c3c;
+            font-size: 14px;
+            font-weight: 600;
+            color: #ccc;
+        }
+
+        .cbtn-modal-body {
+            padding: 12px 16px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .cbtn-modal-item {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .cbtn-modal-item input {
+            flex: 1;
+            background: #2d2d2d;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            color: #ccc;
+            padding: 5px 8px;
+            font-size: 12px;
+        }
+
+        .cbtn-modal-item input:focus {
+            outline: none;
+            border-color: #4ec9b0;
+        }
+
+        .cbtn-modal-item .cbtn-del {
+            background: none;
+            border: none;
+            color: #f44;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 2px 6px;
+            line-height: 1;
+        }
+
+        .cbtn-modal-item .cbtn-del:hover {
+            color: #f88;
+        }
+
+        .cbtn-modal-footer {
+            padding: 10px 16px;
+            border-top: 1px solid #3c3c3c;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .cbtn-modal-footer button {
+            border: none;
+            border-radius: 4px;
+            padding: 5px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .cbtn-modal-add {
+            background: #3c3c3c;
+            color: #ccc;
+        }
+
+        .cbtn-modal-add:hover {
+            background: #4a4a4a;
+        }
+
+        .cbtn-modal-save {
+            background: #0e639c;
+            color: #fff;
+        }
+
+        .cbtn-modal-save:hover {
+            background: #1177bb;
         }
 
         /* Floating Prompt Bubble */
@@ -1338,6 +1493,8 @@
                 <iframe id="claude-frame" scrolling="no"></iframe>
                 <div class="terminal-send-bar">
                     <span class="send-hint">Enter submits in terminal</span>
+                    <div class="custom-buttons" id="custom-buttons"></div>
+                    <button class="custom-btn-config" id="custom-btn-config" title="Configure buttons">&#x2699;</button>
                     <button id="claude-send-btn" title="Send Enter to Claude terminal">Send</button>
                 </div>
             </div>
@@ -1511,6 +1668,18 @@
                 <div class="upload-overlay-icon">&#128247;</div>
                 <div class="upload-overlay-text">Drop image here</div>
                 <div class="upload-overlay-hint">PNG, JPG, GIF, WebP, SVG, BMP (max 10MB)</div>
+            </div>
+        </div>
+
+        <!-- Custom Buttons Config Modal -->
+        <div class="cbtn-modal-overlay" id="cbtn-modal-overlay">
+            <div class="cbtn-modal">
+                <div class="cbtn-modal-header">Custom Buttons</div>
+                <div class="cbtn-modal-body" id="cbtn-modal-body"></div>
+                <div class="cbtn-modal-footer">
+                    <button class="cbtn-modal-add" id="cbtn-modal-add">+ Add</button>
+                    <button class="cbtn-modal-save" id="cbtn-modal-save">Save</button>
+                </div>
             </div>
         </div>
 
@@ -1733,6 +1902,110 @@
                 }
                 setTimeout(() => { sendBtn.disabled = false; }, 300);
             });
+        })();
+
+        // Custom command buttons
+        (function() {
+            const STORAGE_KEY = 'frank-custom-buttons';
+            const DEFAULT_BUTTONS = [{ id: Date.now(), label: 'Status', command: '/status' }];
+
+            function loadButtons() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (raw) return JSON.parse(raw);
+                } catch(e) {}
+                return DEFAULT_BUTTONS;
+            }
+
+            function saveButtons(buttons) {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(buttons));
+            }
+
+            function renderButtons() {
+                const container = document.getElementById('custom-buttons');
+                container.innerHTML = '';
+                const buttons = loadButtons();
+                buttons.forEach(btn => {
+                    const el = document.createElement('button');
+                    el.className = 'custom-btn';
+                    el.textContent = btn.label;
+                    el.title = btn.command;
+                    el.addEventListener('click', async () => {
+                        el.disabled = true;
+                        try {
+                            const sendUrl = STATUS_URL.replace('/status', '/status/send-prompt');
+                            await fetch(sendUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ text: btn.command, autoSubmit: true, session: 'frank-claude' }),
+                            });
+                        } catch(e) {
+                            console.error('Custom button send error:', e);
+                        }
+                        setTimeout(() => { el.disabled = false; }, 500);
+                    });
+                    container.appendChild(el);
+                });
+            }
+
+            // Config modal
+            const overlay = document.getElementById('cbtn-modal-overlay');
+            const body = document.getElementById('cbtn-modal-body');
+            const addBtn = document.getElementById('cbtn-modal-add');
+            const saveBtn = document.getElementById('cbtn-modal-save');
+            const configBtn = document.getElementById('custom-btn-config');
+
+            function renderModalItems(buttons) {
+                body.innerHTML = '';
+                buttons.forEach((btn, i) => {
+                    const item = document.createElement('div');
+                    item.className = 'cbtn-modal-item';
+                    item.innerHTML = `<input type="text" placeholder="Label" value="${btn.label.replace(/"/g, '&quot;')}" data-field="label">` +
+                        `<input type="text" placeholder="Command" value="${btn.command.replace(/"/g, '&quot;')}" data-field="command">` +
+                        `<button class="cbtn-del" title="Delete">&times;</button>`;
+                    item.querySelector('.cbtn-del').addEventListener('click', () => {
+                        item.remove();
+                    });
+                    body.appendChild(item);
+                });
+            }
+
+            function getModalItems() {
+                const items = [];
+                body.querySelectorAll('.cbtn-modal-item').forEach(item => {
+                    const label = item.querySelector('[data-field="label"]').value.trim();
+                    const command = item.querySelector('[data-field="command"]').value.trim();
+                    if (label && command) {
+                        items.push({ id: Date.now() + Math.random(), label, command });
+                    }
+                });
+                return items;
+            }
+
+            configBtn.addEventListener('click', () => {
+                renderModalItems(loadButtons());
+                overlay.classList.add('open');
+            });
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.classList.remove('open');
+            });
+
+            addBtn.addEventListener('click', () => {
+                renderModalItems([...getModalItems(), { label: '', command: '' }]);
+                const inputs = body.querySelectorAll('.cbtn-modal-item:last-child input');
+                if (inputs.length) inputs[0].focus();
+            });
+
+            saveBtn.addEventListener('click', () => {
+                const items = getModalItems();
+                saveButtons(items);
+                renderButtons();
+                overlay.classList.remove('open');
+            });
+
+            // Initial render
+            renderButtons();
         })();
 
         function formatNumber(num) {
