@@ -703,7 +703,7 @@
             border-color: #4ec9b0;
         }
 
-        /* Send bar below terminal */
+        /* Command bar below terminal */
         .terminal-send-bar {
             display: flex;
             align-items: center;
@@ -713,31 +713,6 @@
             background: #252526;
             border-top: 1px solid #3c3c3c;
             flex-shrink: 0;
-        }
-
-        .terminal-send-bar #claude-send-btn {
-            background: #0e639c;
-            border: none;
-            color: #fff;
-            font-size: 12px;
-            padding: 5px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.15s;
-            margin-left: auto;
-        }
-
-        .terminal-send-bar #claude-send-btn:hover {
-            background: #1177bb;
-        }
-
-        .terminal-send-bar #claude-send-btn:active {
-            background: #0d5689;
-        }
-
-        .terminal-send-bar .send-hint {
-            font-size: 11px;
-            color: #555;
         }
 
         .custom-buttons {
@@ -1492,10 +1467,8 @@
                 </div>
                 <iframe id="claude-frame" scrolling="no"></iframe>
                 <div class="terminal-send-bar">
-                    <span class="send-hint">Enter submits in terminal</span>
                     <div class="custom-buttons" id="custom-buttons"></div>
                     <button class="custom-btn-config" id="custom-btn-config" title="Configure buttons">&#x2699;</button>
-                    <button id="claude-send-btn" title="Send Enter to Claude terminal">Send</button>
                 </div>
             </div>
 
@@ -1881,28 +1854,6 @@
             STATUS_URL = `http://${window.location.hostname}:${statusPort}/status`;
         }
         console.log('STATUS_URL:', STATUS_URL, '(port:', statusPort, ')');
-
-        // Send button for Claude terminal (sends Enter keystroke)
-        (function() {
-            const sendBtn = document.getElementById('claude-send-btn');
-            sendBtn.addEventListener('click', async () => {
-                sendBtn.disabled = true;
-                try {
-                    const sendUrl = STATUS_URL.replace('/status', '/status/send-enter');
-                    const response = await fetch(sendUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ session: 'frank-claude' }),
-                    });
-                    if (!response.ok) {
-                        console.error('Send failed:', response.status);
-                    }
-                } catch (e) {
-                    console.error('Send error:', e);
-                }
-                setTimeout(() => { sendBtn.disabled = false; }, 300);
-            });
-        })();
 
         // Custom command buttons
         (function() {
