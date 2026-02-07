@@ -105,6 +105,19 @@ pnyx_tick_state = {
 }
 pnyx_tick_lock = threading.Lock()
 
+# GitHub issue monitor state
+gh_monitor_state = {
+    'enabled': False,
+    'interval_seconds': 120,  # 2 minutes default
+    'last_check': None,
+    'next_check': None,
+    'last_result': None,
+    'timer_thread': None,
+    'stop_event': None,
+    'processed_issues': set(),  # Issue numbers already sent to Claude
+}
+gh_monitor_lock = threading.Lock()
+
 # Prompt textbox state (reported by web UI)
 prompt_textbox_state = {
     'has_text': False,
@@ -368,6 +381,248 @@ def get_pnyx_tick_status():
             status['next_tick_in_seconds'] = max(0, int(remaining))
         else:
             status['next_tick_in_seconds'] = None
+
+        return status
+
+
+# =========================================================================
+# GitHub Issue Monitor (checks for enkai: labeled issues)
+# =========================================================================
+
+def get_gh_repo():
+    """Parse GIT_REPO env var to extract owner/repo (e.g. 'tegryan-ddo/enkai')."""
+    git_repo = os.environ.get('GIT_REPO', '')
+    if not git_repo:
+        return None
+
+    # Handle https://github.com/owner/repo.git or git@github.com:owner/repo.git
+    import re
+    match = re.match(r'(?:https?://github\.com/|git@github\.com:)([^/]+/[^/.]+?)(?:\.git)?$', git_repo)
+    if match:
+        return match.group(1)
+
+    # Handle plain owner/repo format
+    match = re.match(r'^([^/]+/[^/]+)$', git_repo)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def check_github_issues():
+    """
+    Check GitHub for open issues with labels prefixed 'enkai:'.
+    If Claude is idle, send one unprocessed issue as a prompt.
+    """
+    import subprocess
+
+    repo = get_gh_repo()
+    if not repo:
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'error': 'No GIT_REPO configured',
+            'issues_found': 0,
+            'sent': False,
+        }
+
+    log(f"GH monitor: checking issues for {repo}...")
+
+    try:
+        result = subprocess.run(
+            ['gh', 'issue', 'list', '--repo', repo,
+             '--search', 'label:enkai:', '--json', 'number,title,body,labels',
+             '--state', 'open'],
+            capture_output=True, text=True, timeout=30
+        )
+
+        if result.returncode != 0:
+            log(f"GH monitor: gh cli error: {result.stderr}")
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'error': f'gh cli error: {result.stderr.strip()[:100]}',
+                'issues_found': 0,
+                'sent': False,
+            }
+
+        issues = json.loads(result.stdout) if result.stdout.strip() else []
+    except subprocess.TimeoutExpired:
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'error': 'gh cli timed out',
+            'issues_found': 0,
+            'sent': False,
+        }
+    except Exception as e:
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'error': str(e),
+            'issues_found': 0,
+            'sent': False,
+        }
+
+    # Filter out already-processed issues
+    with gh_monitor_lock:
+        processed = gh_monitor_state['processed_issues']
+        new_issues = [i for i in issues if i['number'] not in processed]
+
+    if not new_issues:
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'issues_found': len(issues),
+            'new_issues': 0,
+            'sent': False,
+            'skipped': True,
+            'reason': 'No new issues' if not issues else 'All issues already processed',
+        }
+
+    # Check if Claude is ready
+    state = get_claude_state()
+    if not state['idle']:
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'issues_found': len(issues),
+            'new_issues': len(new_issues),
+            'sent': False,
+            'skipped': True,
+            'reason': 'Claude is busy',
+            'claude_state': state,
+        }
+
+    if not state['prompt_empty']:
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'issues_found': len(issues),
+            'new_issues': len(new_issues),
+            'sent': False,
+            'skipped': True,
+            'reason': 'Prompt textbox has text',
+            'claude_state': state,
+        }
+
+    # Process one issue per tick
+    issue = new_issues[0]
+    labels = ', '.join(l.get('name', '') for l in issue.get('labels', []))
+    body = issue.get('body', '') or '(no description)'
+
+    prompt = (
+        f"Please work on this GitHub issue:\n\n"
+        f"Issue #{issue['number']}: {issue['title']}\n"
+        f"Labels: {labels}\n"
+        f"Repository: {repo}\n\n"
+        f"{body}\n\n"
+        f"When done, close the issue with: gh issue close {issue['number']} --repo {repo}"
+    )
+
+    success = send_to_tmux(prompt, session='frank-claude', auto_submit=True)
+
+    if success:
+        with gh_monitor_lock:
+            gh_monitor_state['processed_issues'].add(issue['number'])
+        log(f"GH monitor: sent issue #{issue['number']} to Claude")
+    else:
+        log(f"GH monitor: failed to send issue #{issue['number']}")
+
+    return {
+        'timestamp': datetime.now().isoformat(),
+        'issues_found': len(issues),
+        'new_issues': len(new_issues),
+        'sent': success,
+        'issue_number': issue['number'],
+        'issue_title': issue['title'],
+        'claude_state': state,
+    }
+
+
+def gh_monitor_timer_loop(stop_event, interval_seconds):
+    """Background timer loop for GitHub issue monitoring."""
+    while not stop_event.is_set():
+        if stop_event.wait(timeout=interval_seconds):
+            break
+
+        try:
+            result = check_github_issues()
+            with gh_monitor_lock:
+                gh_monitor_state['last_check'] = datetime.now().isoformat()
+                gh_monitor_state['last_result'] = result
+                gh_monitor_state['next_check'] = (
+                    datetime.now().timestamp() + gh_monitor_state['interval_seconds']
+                )
+        except Exception as e:
+            log(f"GH monitor error: {e}")
+            with gh_monitor_lock:
+                gh_monitor_state['last_result'] = {'error': str(e)}
+
+    log("GH monitor timer stopped")
+
+
+def start_gh_monitor(interval_seconds=120):
+    """Start the GitHub issue monitor background timer."""
+    global gh_monitor_state
+
+    with gh_monitor_lock:
+        # Stop existing timer if running
+        if gh_monitor_state['timer_thread'] and gh_monitor_state['timer_thread'].is_alive():
+            gh_monitor_state['stop_event'].set()
+            gh_monitor_state['timer_thread'].join(timeout=5)
+
+        stop_event = threading.Event()
+        timer_thread = threading.Thread(
+            target=gh_monitor_timer_loop,
+            args=(stop_event, interval_seconds),
+            daemon=True
+        )
+
+        gh_monitor_state['enabled'] = True
+        gh_monitor_state['interval_seconds'] = interval_seconds
+        gh_monitor_state['stop_event'] = stop_event
+        gh_monitor_state['timer_thread'] = timer_thread
+        gh_monitor_state['next_check'] = datetime.now().timestamp() + interval_seconds
+
+        timer_thread.start()
+        log(f"GH monitor started (interval: {interval_seconds}s)")
+
+    return True
+
+
+def stop_gh_monitor():
+    """Stop the GitHub issue monitor background timer."""
+    global gh_monitor_state
+
+    with gh_monitor_lock:
+        if gh_monitor_state['stop_event']:
+            gh_monitor_state['stop_event'].set()
+
+        if gh_monitor_state['timer_thread']:
+            gh_monitor_state['timer_thread'].join(timeout=5)
+
+        gh_monitor_state['enabled'] = False
+        gh_monitor_state['timer_thread'] = None
+        gh_monitor_state['stop_event'] = None
+        gh_monitor_state['next_check'] = None
+
+        log("GH monitor stopped")
+
+    return True
+
+
+def get_gh_monitor_status():
+    """Get the current GitHub issue monitor status."""
+    with gh_monitor_lock:
+        status = {
+            'enabled': gh_monitor_state['enabled'],
+            'interval_seconds': gh_monitor_state['interval_seconds'],
+            'last_check': gh_monitor_state['last_check'],
+            'last_result': gh_monitor_state['last_result'],
+            'processed_count': len(gh_monitor_state['processed_issues']),
+            'has_repo': get_gh_repo() is not None,
+            'repo': get_gh_repo(),
+        }
+
+        if gh_monitor_state['next_check']:
+            remaining = gh_monitor_state['next_check'] - datetime.now().timestamp()
+            status['next_check_in_seconds'] = max(0, int(remaining))
+        else:
+            status['next_check_in_seconds'] = None
 
         return status
 
@@ -869,6 +1124,17 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(status).encode())
                 return
 
+            # GitHub issue monitor status endpoint
+            if path == '/status/gh-monitor':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                status = get_gh_monitor_status()
+                status['claude_state'] = get_claude_state()
+                self.wfile.write(json.dumps(status).encode())
+                return
+
             # Static file serving
             # Handle directory requests (serve index.html)
             if path == '/' or path == '':
@@ -1015,6 +1281,73 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({
                     'success': True,
                     'message': 'Pnyx tick started (running in background)',
+                }).encode())
+                return
+
+            elif path == '/status/gh-monitor/start':
+                # Start GitHub issue monitor
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+
+                try:
+                    data = json.loads(body) if body else {}
+                    interval = data.get('interval', 120)  # Default 2 minutes
+
+                    # Validate interval (minimum 30 seconds, maximum 1 hour)
+                    interval = max(30, min(3600, int(interval)))
+
+                    start_gh_monitor(interval)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': True,
+                        'message': f'GH monitor started ({interval}s interval)',
+                        'status': get_gh_monitor_status()
+                    }).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': str(e)}).encode())
+                return
+
+            elif path == '/status/gh-monitor/stop':
+                # Stop GitHub issue monitor
+                stop_gh_monitor()
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'success': True,
+                    'message': 'GH monitor stopped',
+                    'status': get_gh_monitor_status()
+                }).encode())
+                return
+
+            elif path == '/status/gh-monitor/now':
+                # Check GitHub issues immediately
+                def run_gh_check_background():
+                    result = check_github_issues()
+                    with gh_monitor_lock:
+                        gh_monitor_state['last_check'] = datetime.now().isoformat()
+                        gh_monitor_state['last_result'] = result
+
+                thread = threading.Thread(target=run_gh_check_background, daemon=True)
+                thread.start()
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'success': True,
+                    'message': 'GH check started (running in background)',
                 }).encode())
                 return
 
