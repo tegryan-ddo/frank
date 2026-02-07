@@ -493,6 +493,42 @@
             border-top: 1px solid #3c3c3c;
         }
 
+        .gh-monitor-btn {
+            padding: 3px 10px;
+            background: #2d2d2d;
+            color: #9d9d9d;
+            border: 1px solid #3c3c3c;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .gh-monitor-btn:hover {
+            background: #1e3a1e;
+            color: #6a9955;
+            border-color: #6a9955;
+        }
+
+        .gh-monitor-btn.active {
+            background: #1e3a1e;
+            color: #6a9955;
+            border-color: #6a9955;
+        }
+
+        .gh-monitor-btn.active:hover {
+            background: #3a1e1e;
+            color: #f44747;
+            border-color: #f44747;
+        }
+
+        .gh-monitor-btn.no-repo {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
         .pnyx-tick-controls {
             display: flex;
             gap: 8px;
@@ -1444,6 +1480,7 @@
             <button class="restart-btn" id="restart-btn" title="Stop and restart this profile to apply the update">Restart</button>
         </div>
         <div class="header-right">
+            <button class="gh-monitor-btn" id="gh-monitor-toggle" title="Monitor GitHub issues labeled enkai:">Check GH</button>
             <span class="user-badge" id="user-badge">
                 <span class="user-icon">&#x1F464;</span>
                 <span id="user-name"></span>
@@ -1598,6 +1635,53 @@
                     <div class="pnyx-tick-no-creds" id="pnyx-no-creds" style="display: none;">
                         <span class="warning-icon">&#x26A0;</span>
                         No Pnyx credentials found
+                    </div>
+                </div>
+
+                <!-- GitHub Monitor Section -->
+                <div class="context-section gh-monitor-section">
+                    <div class="context-section-title">GitHub Monitor</div>
+                    <div class="pnyx-tick-controls">
+                        <button class="pnyx-tick-btn" id="gh-monitor-panel-toggle" title="Start/Stop GitHub issue monitoring">
+                            <span class="tick-icon">&#x25B6;</span>
+                            <span class="tick-label">Start</span>
+                        </button>
+                        <select id="gh-monitor-interval" class="pnyx-tick-interval" title="Check interval">
+                            <option value="30">30s</option>
+                            <option value="60">1m</option>
+                            <option value="120" selected>2m</option>
+                            <option value="300">5m</option>
+                            <option value="600">10m</option>
+                        </select>
+                        <button class="pnyx-tick-now-btn" id="gh-monitor-now" title="Check now">
+                            Now
+                        </button>
+                    </div>
+                    <div class="pnyx-tick-status" id="gh-monitor-status">
+                        <div class="tick-status-row">
+                            <span class="tick-status-label">Status:</span>
+                            <span class="tick-status-value" id="gh-status-text">Stopped</span>
+                        </div>
+                        <div class="tick-status-row">
+                            <span class="tick-status-label">Repo:</span>
+                            <span class="tick-status-value" id="gh-repo-text">-</span>
+                        </div>
+                        <div class="tick-status-row">
+                            <span class="tick-status-label">Processed:</span>
+                            <span class="tick-status-value" id="gh-processed-count">0</span>
+                        </div>
+                        <div class="tick-status-row" id="gh-next-row" style="display: none;">
+                            <span class="tick-status-label">Next:</span>
+                            <span class="tick-status-value" id="gh-next-time">-</span>
+                        </div>
+                        <div class="tick-status-row" id="gh-last-row" style="display: none;">
+                            <span class="tick-status-label">Last:</span>
+                            <span class="tick-status-value" id="gh-last-result">-</span>
+                        </div>
+                    </div>
+                    <div class="pnyx-tick-no-creds" id="gh-no-repo" style="display: none;">
+                        <span class="warning-icon">&#x26A0;</span>
+                        No GIT_REPO configured
                     </div>
                 </div>
 
@@ -2867,6 +2951,191 @@
             // Initial fetch and polling
             fetchStatus();
             pollInterval = setInterval(fetchStatus, 10000); // Poll every 10 seconds
+        })();
+
+        // =============================================
+        // GitHub Monitor Controls
+        // =============================================
+        (function() {
+            const headerBtn = document.getElementById('gh-monitor-toggle');
+            const panelToggleBtn = document.getElementById('gh-monitor-panel-toggle');
+            const intervalSelect = document.getElementById('gh-monitor-interval');
+            const nowBtn = document.getElementById('gh-monitor-now');
+            const statusText = document.getElementById('gh-status-text');
+            const repoText = document.getElementById('gh-repo-text');
+            const processedCount = document.getElementById('gh-processed-count');
+            const nextRow = document.getElementById('gh-next-row');
+            const nextTime = document.getElementById('gh-next-time');
+            const lastRow = document.getElementById('gh-last-row');
+            const lastResult = document.getElementById('gh-last-result');
+            const noRepo = document.getElementById('gh-no-repo');
+
+            let isRunning = false;
+            let pollInterval = null;
+
+            function formatTimeRemaining(seconds) {
+                if (seconds <= 0) return 'now';
+                const m = Math.floor(seconds / 60);
+                const s = seconds % 60;
+                if (m > 0) return `${m}m ${s}s`;
+                return `${s}s`;
+            }
+
+            function formatLastResult(result) {
+                if (!result) return '-';
+                if (result.error) return `Error: ${result.error.substring(0, 40)}`;
+                if (result.skipped) return `Skipped: ${result.reason || 'busy'}`;
+                if (result.sent) return `Sent #${result.issue_number}: ${(result.issue_title || '').substring(0, 30)}`;
+                if (result.sent === false && result.new_issues === 0) return `${result.issues_found || 0} issues, none new`;
+                if (result.sent === false) return 'Failed to send';
+                return '-';
+            }
+
+            function updateUI(status) {
+                isRunning = status.enabled;
+
+                // Update header button
+                if (isRunning) {
+                    headerBtn.classList.add('active');
+                    panelToggleBtn.classList.add('active');
+                    panelToggleBtn.querySelector('.tick-icon').textContent = '\u25A0';
+                    panelToggleBtn.querySelector('.tick-label').textContent = 'Stop';
+                    intervalSelect.disabled = true;
+                    statusText.textContent = 'Running';
+                    statusText.className = 'tick-status-value running';
+                } else {
+                    headerBtn.classList.remove('active');
+                    panelToggleBtn.classList.remove('active');
+                    panelToggleBtn.querySelector('.tick-icon').textContent = '\u25B6';
+                    panelToggleBtn.querySelector('.tick-label').textContent = 'Start';
+                    intervalSelect.disabled = false;
+                    statusText.textContent = 'Stopped';
+                    statusText.className = 'tick-status-value stopped';
+                }
+
+                // Repo info
+                repoText.textContent = status.repo || '-';
+                processedCount.textContent = status.processed_count || 0;
+
+                // Next check time
+                if (status.next_check_in_seconds !== null && status.next_check_in_seconds !== undefined) {
+                    nextRow.style.display = 'flex';
+                    nextTime.textContent = formatTimeRemaining(status.next_check_in_seconds);
+                } else {
+                    nextRow.style.display = 'none';
+                }
+
+                // Last result
+                if (status.last_result) {
+                    lastRow.style.display = 'flex';
+                    lastResult.textContent = formatLastResult(status.last_result);
+                    lastResult.title = JSON.stringify(status.last_result, null, 2);
+                } else {
+                    lastRow.style.display = 'none';
+                }
+
+                // Show/hide no-repo warning
+                if (!status.has_repo) {
+                    noRepo.style.display = 'flex';
+                    headerBtn.classList.add('no-repo');
+                    headerBtn.disabled = true;
+                    panelToggleBtn.disabled = true;
+                    nowBtn.disabled = true;
+                } else {
+                    noRepo.style.display = 'none';
+                    headerBtn.classList.remove('no-repo');
+                    headerBtn.disabled = false;
+                    panelToggleBtn.disabled = false;
+                    nowBtn.disabled = false;
+                }
+            }
+
+            async function fetchStatus() {
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/gh-monitor');
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const status = await response.json();
+                        updateUI(status);
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch GH monitor status:', e);
+                }
+            }
+
+            async function startMonitor() {
+                const interval = parseInt(intervalSelect.value, 10);
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/gh-monitor/start');
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ interval }),
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        updateUI(data.status);
+                    }
+                } catch (e) {
+                    console.error('Failed to start GH monitor:', e);
+                }
+            }
+
+            async function stopMonitor() {
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/gh-monitor/stop');
+                    const response = await fetch(url, { method: 'POST' });
+                    if (response.ok) {
+                        const data = await response.json();
+                        updateUI(data.status);
+                    }
+                } catch (e) {
+                    console.error('Failed to stop GH monitor:', e);
+                }
+            }
+
+            async function checkNow() {
+                nowBtn.disabled = true;
+                nowBtn.textContent = '...';
+                try {
+                    const url = STATUS_URL.replace('/status', '/status/gh-monitor/now');
+                    const response = await fetch(url, { method: 'POST' });
+                    if (response.ok) {
+                        setTimeout(fetchStatus, 3000);
+                    }
+                } catch (e) {
+                    console.error('Failed to check GH now:', e);
+                } finally {
+                    setTimeout(() => {
+                        nowBtn.disabled = false;
+                        nowBtn.textContent = 'Now';
+                    }, 2000);
+                }
+            }
+
+            // Header button toggles start/stop
+            headerBtn.addEventListener('click', () => {
+                if (isRunning) {
+                    stopMonitor();
+                } else {
+                    startMonitor();
+                }
+            });
+
+            // Panel button does the same
+            panelToggleBtn.addEventListener('click', () => {
+                if (isRunning) {
+                    stopMonitor();
+                } else {
+                    startMonitor();
+                }
+            });
+
+            nowBtn.addEventListener('click', checkNow);
+
+            // Initial fetch and polling
+            fetchStatus();
+            pollInterval = setInterval(fetchStatus, 10000);
         })();
 
         // Feedback handling
