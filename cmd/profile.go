@@ -36,6 +36,7 @@ var (
 	profileAddRepo        string
 	profileAddBranch      string
 	profileAddDescription string
+	profileAddURL         string
 )
 
 // SSM parameter name for profiles
@@ -55,6 +56,7 @@ func init() {
 	profileAddCmd.Flags().StringVarP(&profileAddRepo, "repo", "r", "", "Git repository URL (required)")
 	profileAddCmd.Flags().StringVarP(&profileAddBranch, "branch", "b", "main", "Git branch")
 	profileAddCmd.Flags().StringVarP(&profileAddDescription, "description", "d", "", "Profile description")
+	profileAddCmd.Flags().StringVarP(&profileAddURL, "url", "u", "", "Deployed site URL")
 	profileAddCmd.MarkFlagRequired("repo")
 }
 
@@ -148,6 +150,7 @@ func runProfileAdd(cmd *cobra.Command, args []string) error {
 		Repo:        profileAddRepo,
 		Branch:      profileAddBranch,
 		Description: profileAddDescription,
+		SiteURL:     profileAddURL,
 	}
 
 	if err := profile.AddProfile(p); err != nil {
@@ -159,6 +162,9 @@ func runProfileAdd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Branch:      %s\n", p.Branch)
 	if p.Description != "" {
 		fmt.Printf("  Description: %s\n", p.Description)
+	}
+	if p.SiteURL != "" {
+		fmt.Printf("  Site URL:    %s\n", p.SiteURL)
 	}
 	fmt.Println()
 	fmt.Printf("Start with: frank ecs start %s\n", name)
@@ -192,6 +198,9 @@ func runProfileShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Branch:      %s\n", p.Branch)
 	if p.Description != "" {
 		fmt.Printf("  Description: %s\n", p.Description)
+	}
+	if p.SiteURL != "" {
+		fmt.Printf("  Site URL:    %s\n", p.SiteURL)
 	}
 	fmt.Println()
 	fmt.Printf("  URL:         https://frank.digitaldevops.io/%s/\n", name)
@@ -257,6 +266,7 @@ func runProfileSync(cmd *cobra.Command, args []string) error {
 		Repo        string `json:"repo"`
 		Branch      string `json:"branch,omitempty"`
 		Description string `json:"description,omitempty"`
+		SiteURL     string `json:"site_url,omitempty"`
 	}
 
 	profiles := make([]ssmProfile, 0, len(cfg.Profiles))
@@ -266,6 +276,7 @@ func runProfileSync(cmd *cobra.Command, args []string) error {
 			Repo:        p.Repo,
 			Branch:      p.Branch,
 			Description: p.Description,
+			SiteURL:     p.SiteURL,
 		})
 	}
 
