@@ -308,6 +308,26 @@ clone_plugins_repo
 # Worktrees persist on EFS, containers with same name reuse them
 # -----------------------------------------------------------------------------
 
+# Install the post-checkout hook into a repo so new worktrees get .claude/ auto-copied.
+# Git's init.templateDir only applies at clone/init time, so for repos already on EFS
+# we need to install the hook directly.
+install_worktree_hook() {
+    local repo_path="$1"
+    local hook_src="/usr/share/git-core/templates/hooks/post-checkout"
+    local hook_dst="$repo_path/.git/hooks/post-checkout"
+
+    [ -f "$hook_src" ] || return 0
+    [ -d "$repo_path/.git/hooks" ] || return 0
+
+    # Don't overwrite an existing hook that differs (might be project-specific)
+    if [ -f "$hook_dst" ] && ! grep -q "copies .claude/ directory into new git worktrees" "$hook_dst" 2>/dev/null; then
+        return 0
+    fi
+
+    cp "$hook_src" "$hook_dst"
+    chmod +x "$hook_dst"
+}
+
 # Copy .claude directory from base repo to worktree for hooks/settings
 # Note: We copy instead of symlink because hooks use $CLAUDE_PROJECT_DIR paths
 # which don't resolve correctly through symlinks
@@ -389,6 +409,9 @@ setup_prewarmed_worktree() {
     echo "Pulling latest changes..."
     git -C "$prewarmed_worktree" pull --ff-only 2>/dev/null || true
 
+    # Install post-checkout hook so future worktrees get .claude/ automatically
+    install_worktree_hook "$prewarmed_base"
+
     # Copy fresh .claude directory
     if [ -d "$prewarmed_base/.claude" ]; then
         copy_claude_directory "$prewarmed_worktree" "$prewarmed_base"
@@ -461,6 +484,9 @@ setup_worktree_from_clone() {
             git -C "$REPO_BASE" worktree add -b "$CONTAINER_NAME" "$WORKTREE_PATH" "origin/$branch"
     fi
 
+    # Install post-checkout hook so future worktrees get .claude/ automatically
+    install_worktree_hook "$REPO_BASE"
+
     # Link .claude directory for hooks and settings
     copy_claude_directory "$WORKTREE_PATH" "$REPO_BASE"
 
@@ -503,6 +529,9 @@ setup_worktree_from_local() {
             git -C /workspace worktree add "$WORKTREE_PATH" "$current_branch" 2>/dev/null || \
             git -C /workspace worktree add -b "$CONTAINER_NAME" "$WORKTREE_PATH" HEAD
     fi
+
+    # Install post-checkout hook so future worktrees get .claude/ automatically
+    install_worktree_hook "/workspace"
 
     # Link .claude directory for hooks and settings
     copy_claude_directory "$WORKTREE_PATH" "/workspace"

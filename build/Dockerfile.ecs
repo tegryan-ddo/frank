@@ -171,6 +171,10 @@ RUN chmod +x /usr/local/bin/pnyx-credential-sync.sh
 COPY build/analytics-sync.sh /usr/local/bin/analytics-sync.sh
 RUN chmod +x /usr/local/bin/analytics-sync.sh
 
+# Install git template with post-checkout hook (copies .claude/ into new worktrees)
+COPY build/git-templates/ /usr/share/git-core/templates/
+RUN chmod +x /usr/share/git-core/templates/hooks/post-checkout
+
 # Copy ECS-specific entrypoint
 COPY build/entrypoint-ecs.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
