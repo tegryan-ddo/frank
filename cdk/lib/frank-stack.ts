@@ -529,6 +529,7 @@ export class FrankStack extends cdk.Stack {
         'elasticloadbalancing:DeleteRule',
         'elasticloadbalancing:RegisterTargets',
         'elasticloadbalancing:DeregisterTargets',
+        'elasticloadbalancing:DescribeTargetHealth',
         'elasticloadbalancing:AddTags',
       ],
       resources: ['*'],

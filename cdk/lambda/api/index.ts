@@ -19,6 +19,7 @@ import {
   DeleteRuleCommand,
   RegisterTargetsCommand,
   DeregisterTargetsCommand,
+  DescribeTargetHealthCommand,
   DescribeLoadBalancersCommand,
   DescribeListenersCommand,
   Listener,
@@ -60,6 +61,7 @@ interface ProfileStatus extends Profile {
   url?: string;
   activeUsers?: number;
   users?: Array<{ display_name: string; short_id: string }>;
+  health?: 'healthy' | 'unhealthy' | 'unknown';
 }
 
 interface ApiResponse {
@@ -101,6 +103,10 @@ export async function handler(event: any): Promise<ApiResponse> {
     const startMatch = path.match(/^\/api\/profiles\/([^/]+)\/start$/);
     if (startMatch && method === 'POST') {
       return await startProfile(startMatch[1]);
+    }
+
+    if (path === '/api/cleanup' && method === 'POST') {
+      return await cleanupOrphanedResources();
     }
 
     const stopMatch = path.match(/^\/api\/profiles\/([^/]+)\/stop$/);
@@ -228,6 +234,119 @@ async function fetchActiveUsers(
   return { count: 0, users: [] };
 }
 
+async function fetchTargetHealth(
+  profileName: string
+): Promise<'healthy' | 'unhealthy' | 'unknown'> {
+  try {
+    const tgName = `frank-profile-${profileName}`.substring(0, 32);
+    const tgResult = await elbClient.send(
+      new DescribeTargetGroupsCommand({ Names: [tgName] })
+    );
+    const tgArn = tgResult.TargetGroups?.[0]?.TargetGroupArn;
+    if (!tgArn) return 'unknown';
+
+    const healthResult = await elbClient.send(
+      new DescribeTargetHealthCommand({ TargetGroupArn: tgArn })
+    );
+    const descriptions = healthResult.TargetHealthDescriptions || [];
+    if (descriptions.length === 0) return 'unknown';
+
+    // If any target is healthy, report healthy
+    const hasHealthy = descriptions.some(
+      (d) => d.TargetHealth?.State === 'healthy'
+    );
+    if (hasHealthy) return 'healthy';
+
+    return 'unhealthy';
+  } catch (e) {
+    return 'unknown';
+  }
+}
+
+async function getOrphanedTargetGroups(
+  runningProfiles: Set<string>
+): Promise<string[]> {
+  const orphanProfiles: string[] = [];
+  try {
+    let marker: string | undefined;
+    const allTgs: Array<{ name: string; arn: string }> = [];
+
+    do {
+      const result = await elbClient.send(
+        new DescribeTargetGroupsCommand({ Marker: marker })
+      );
+      for (const tg of result.TargetGroups || []) {
+        const name = tg.TargetGroupName || '';
+        if (name.startsWith('frank-profile-')) {
+          allTgs.push({ name, arn: tg.TargetGroupArn || '' });
+        }
+      }
+      marker = result.NextMarker;
+    } while (marker);
+
+    // Extract profile names from TG names (strip prefix and suffixes)
+    const seenProfiles = new Set<string>();
+    for (const tg of allTgs) {
+      let profileName = tg.name.replace('frank-profile-', '');
+      // Strip known suffixes
+      if (profileName.endsWith('-t')) {
+        profileName = profileName.slice(0, -2);
+      } else if (profileName.endsWith('-b')) {
+        profileName = profileName.slice(0, -2);
+      }
+      seenProfiles.add(profileName);
+    }
+
+    for (const profileName of seenProfiles) {
+      if (!runningProfiles.has(profileName)) {
+        orphanProfiles.push(profileName);
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to scan for orphaned TGs:', e);
+  }
+  return orphanProfiles;
+}
+
+async function cleanupOrphanedResources(): Promise<ApiResponse> {
+  const runningTasks = await getRunningTasks();
+  const runningProfiles = new Set(runningTasks.keys());
+  const orphans = await getOrphanedTargetGroups(runningProfiles);
+
+  let deleted = 0;
+  const errors: string[] = [];
+
+  for (const profileName of orphans) {
+    for (const config of TARGET_GROUP_CONFIGS) {
+      try {
+        const tgName = `frank-profile-${profileName}${config.suffix}`.substring(0, 32);
+        const tgResult = await elbClient.send(
+          new DescribeTargetGroupsCommand({ Names: [tgName] })
+        );
+        const tgArn = tgResult.TargetGroups?.[0]?.TargetGroupArn;
+        if (tgArn) {
+          await deleteTargetGroup(tgArn);
+          deleted++;
+        }
+      } catch (error: any) {
+        if (error.name !== 'TargetGroupNotFoundException') {
+          errors.push(`${profileName}${config.suffix}: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  return {
+    statusCode: 200,
+    headers: corsHeaders,
+    body: JSON.stringify({
+      orphanProfiles: orphans,
+      deletedTargetGroups: deleted,
+      errors: errors.length > 0 ? errors : undefined,
+    }),
+  };
+}
+
 async function listProfiles(): Promise<ApiResponse> {
   // Fetch profiles and running tasks in parallel
   const [profiles, runningTasks] = await Promise.all([
@@ -246,25 +365,31 @@ async function listProfiles(): Promise<ApiResponse> {
     };
   });
 
-  // Fetch active users for all running tasks in parallel
+  // Fetch active users and health for all running tasks in parallel
   const runningStatuses = statuses.filter((s) => s.status === 'running');
   const userInfoPromises = runningStatuses.map((s) => {
     const running = runningTasks.get(s.name);
     return running?.ip ? fetchActiveUsers(running.ip) : Promise.resolve({ count: 0, users: [] });
   });
+  const healthPromises = runningStatuses.map((s) => fetchTargetHealth(s.name));
 
-  const userInfoResults = await Promise.all(userInfoPromises);
+  const [userInfoResults, healthResults, orphans] = await Promise.all([
+    Promise.all(userInfoPromises),
+    Promise.all(healthPromises),
+    getOrphanedTargetGroups(new Set(runningTasks.keys())),
+  ]);
 
-  // Merge user info back into statuses
+  // Merge user info and health back into statuses
   runningStatuses.forEach((s, i) => {
     s.activeUsers = userInfoResults[i].count;
     s.users = userInfoResults[i].users;
+    s.health = healthResults[i];
   });
 
   return {
     statusCode: 200,
     headers: corsHeaders,
-    body: JSON.stringify({ profiles: statuses }),
+    body: JSON.stringify({ profiles: statuses, orphanCount: orphans.length }),
   };
 }
 
@@ -829,6 +954,24 @@ async function stopProfile(profileName: string): Promise<ApiResponse> {
     }
   }
 
+  // Delete target groups (which cascades to delete listener rules via deleteTargetGroup)
+  for (const config of TARGET_GROUP_CONFIGS) {
+    try {
+      const tgName = `frank-profile-${profileName}${config.suffix}`.substring(0, 32);
+      const tgResult = await elbClient.send(
+        new DescribeTargetGroupsCommand({ Names: [tgName] })
+      );
+      const tgArn = tgResult.TargetGroups?.[0]?.TargetGroupArn;
+      if (tgArn) {
+        await deleteTargetGroup(tgArn);
+      }
+    } catch (error: any) {
+      if (error.name !== 'TargetGroupNotFoundException') {
+        console.warn(`Failed to delete TG ${config.suffix || 'main'}:`, error);
+      }
+    }
+  }
+
   // Stop task
   await ecsClient.send(
     new StopTaskCommand({
@@ -1044,6 +1187,13 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
     .btn-open { background: var(--accent); border-color: var(--accent); color: #fff; text-decoration: none; display: inline-block; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.8rem; font-weight: 500; }
     .btn-open:hover { background: #4393e6; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: 6px; vertical-align: middle; }
+    .health-healthy { background: var(--success); }
+    .health-unhealthy { background: var(--danger); }
+    .health-unknown { background: var(--text-secondary); }
+    .btn-cleanup { border: 1px solid var(--warning); color: var(--warning); background: transparent; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer; margin-left: 0.75rem; transition: all 0.2s; }
+    .btn-cleanup:hover { background: var(--warning); color: #fff; }
+    .btn-cleanup:disabled { opacity: 0.5; cursor: not-allowed; }
     .loading { text-align: center; padding: 3rem; color: var(--text-secondary); }
     .spinner {
       display: inline-block; width: 24px; height: 24px;
@@ -1086,6 +1236,7 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       <p class="subtitle">Claude Code on AWS ECS</p>
       <nav style="margin-top: 1rem;">
         <a href="/dashboard" style="color: var(--accent); text-decoration: none; padding: 0.5rem 1rem; border: 1px solid var(--accent); border-radius: 6px; font-size: 0.9rem;">Analytics Dashboard</a>
+        <button id="cleanup-btn" class="btn-cleanup" style="display: none;" onclick="runCleanup()">Cleanup Orphans (<span id="orphan-count">0</span>)</button>
       </nav>
     </header>
     <div id="error" class="error" style="display: none;"></div>
@@ -1109,6 +1260,7 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
   <script>
     const API_BASE = '/api';
     let profiles = [];
+    let orphanCount = 0;
     let activeCategory = 'all';
     let sortCol = 'name';
     let sortAsc = true;
@@ -1127,7 +1279,17 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         if (!response.ok) throw new Error('Failed to fetch profiles');
         const data = await response.json();
         profiles = data.profiles || [];
+        orphanCount = data.orphanCount || 0;
         isInitialLoad = false;
+        // Show/hide cleanup button
+        const cleanupBtn = document.getElementById('cleanup-btn');
+        const orphanSpan = document.getElementById('orphan-count');
+        if (orphanCount > 0) {
+          cleanupBtn.style.display = 'inline-block';
+          orphanSpan.textContent = orphanCount;
+        } else {
+          cleanupBtn.style.display = 'none';
+        }
         renderProfiles();
       } catch (error) {
         document.getElementById('error').textContent = error.message;
@@ -1251,7 +1413,8 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
         return '<tr data-profile="' + p.name + '">' +
           '<td class="profile-name">' + p.name + '</td>' +
           '<td class="profile-desc">' + (p.description || '-') + '</td>' +
-          '<td><span class="status-badge status-' + p.status + '">' + p.status + '</span></td>' +
+          '<td><span class="status-badge status-' + p.status + '">' + p.status + '</span>' +
+            (p.status === 'running' && p.health ? '<span class="health-dot health-' + p.health + '" title="' + p.health + '"></span>' : '') + '</td>' +
           '<td><span class="users-badge ' + usersClass + '">' + usersText + '</span></td>' +
           '<td>' + urlCell + '</td>' +
           '<td class="actions-cell">' + actions + '</td></tr>';
@@ -1339,6 +1502,28 @@ const LAUNCH_PAGE_HTML = `<!DOCTYPE html>
       } catch (error) {
         document.getElementById('error').textContent = error.message;
         document.getElementById('error').style.display = 'block';
+      }
+    }
+
+    async function runCleanup() {
+      const btn = document.getElementById('cleanup-btn');
+      btn.disabled = true;
+      btn.textContent = 'Cleaning up...';
+      try {
+        const response = await fetch(API_BASE + '/cleanup', { method: 'POST', credentials: 'include' });
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || 'Cleanup failed');
+        }
+        const result = await response.json();
+        const msg = 'Cleaned up ' + result.deletedTargetGroups + ' target group(s) from ' + (result.orphanProfiles || []).length + ' orphan profile(s)';
+        btn.textContent = msg;
+        setTimeout(fetchProfiles, 1000);
+      } catch (error) {
+        document.getElementById('error').textContent = error.message;
+        document.getElementById('error').style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Cleanup Orphans (' + orphanCount + ')';
       }
     }
 

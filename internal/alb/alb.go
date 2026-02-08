@@ -407,6 +407,137 @@ func (m *Manager) DeleteListenerRule(ctx context.Context, profileName string) er
 	return nil // Rule not found, nothing to delete
 }
 
+// targetGroupSuffixes are the suffixes used for profile target groups
+var targetGroupSuffixes = []string{"", "-t", "-b"}
+
+// FindOrphanedTargetGroups lists all frank-profile-* target groups and returns
+// profile names that are not in the runningProfiles set.
+func (m *Manager) FindOrphanedTargetGroups(ctx context.Context, runningProfiles map[string]bool) ([]string, error) {
+	var marker *string
+	seenProfiles := make(map[string]bool)
+
+	for {
+		input := &elasticloadbalancingv2.DescribeTargetGroupsInput{
+			Marker: marker,
+		}
+		result, err := m.elbClient.DescribeTargetGroups(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to describe target groups: %w", err)
+		}
+
+		for _, tg := range result.TargetGroups {
+			name := aws.ToString(tg.TargetGroupName)
+			if !strings.HasPrefix(name, TargetGroupPrefix) {
+				continue
+			}
+			// Strip prefix and known suffixes to get profile name
+			profileName := strings.TrimPrefix(name, TargetGroupPrefix)
+			for _, suffix := range targetGroupSuffixes[1:] { // skip empty suffix
+				profileName = strings.TrimSuffix(profileName, suffix)
+			}
+			seenProfiles[profileName] = true
+		}
+
+		marker = result.NextMarker
+		if marker == nil {
+			break
+		}
+	}
+
+	var orphans []string
+	for profileName := range seenProfiles {
+		if !runningProfiles[profileName] {
+			orphans = append(orphans, profileName)
+		}
+	}
+
+	return orphans, nil
+}
+
+// DeleteAllTargetGroups removes all target groups (main, -t, -b) for a profile
+func (m *Manager) DeleteAllTargetGroups(ctx context.Context, profileName string) error {
+	for _, suffix := range targetGroupSuffixes {
+		tgName := TargetGroupPrefix + profileName + suffix
+		if len(tgName) > 32 {
+			tgName = tgName[:32]
+		}
+
+		existing, err := m.elbClient.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{
+			Names: []string{tgName},
+		})
+		if err != nil {
+			// Target group not found, skip
+			continue
+		}
+
+		if len(existing.TargetGroups) > 0 {
+			tgArn := aws.ToString(existing.TargetGroups[0].TargetGroupArn)
+			_, err = m.elbClient.DeleteTargetGroup(ctx, &elasticloadbalancingv2.DeleteTargetGroupInput{
+				TargetGroupArn: aws.String(tgArn),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to delete target group %s: %w", tgName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// DeleteAllListenerRules removes all listener rules for a profile (main, _t, _b, status)
+func (m *Manager) DeleteAllListenerRules(ctx context.Context, profileName string) error {
+	infra, err := m.DiscoverInfrastructure(ctx)
+	if err != nil {
+		return err
+	}
+
+	rules, err := m.elbClient.DescribeRules(ctx, &elasticloadbalancingv2.DescribeRulesInput{
+		ListenerArn: aws.String(infra.ListenerArn),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to describe listener rules: %w", err)
+	}
+
+	// Path patterns that belong to this profile
+	profilePaths := []string{
+		fmt.Sprintf("/%s/*", profileName),
+		fmt.Sprintf("/%s", profileName),
+		fmt.Sprintf("/%s/_t", profileName),
+		fmt.Sprintf("/%s/_t/*", profileName),
+		fmt.Sprintf("/%s/_b", profileName),
+		fmt.Sprintf("/%s/_b/*", profileName),
+		fmt.Sprintf("/%s/status", profileName),
+		fmt.Sprintf("/%s/status/*", profileName),
+	}
+	pathSet := make(map[string]bool)
+	for _, p := range profilePaths {
+		pathSet[p] = true
+	}
+
+	for _, rule := range rules.Rules {
+		if rule.IsDefault != nil && *rule.IsDefault {
+			continue
+		}
+		for _, cond := range rule.Conditions {
+			if cond.PathPatternConfig != nil {
+				for _, val := range cond.PathPatternConfig.Values {
+					if pathSet[val] {
+						_, err = m.elbClient.DeleteRule(ctx, &elasticloadbalancingv2.DeleteRuleInput{
+							RuleArn: rule.RuleArn,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to delete listener rule: %w", err)
+						}
+						goto nextRule // Rule deleted, move to next
+					}
+				}
+			}
+		}
+	nextRule:
+	}
+
+	return nil
+}
+
 // hashToPriority converts a profile name to a listener rule priority (100-999)
 func hashToPriority(name string) int32 {
 	h := fnv.New32a()

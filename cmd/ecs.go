@@ -71,6 +71,7 @@ func init() {
 	ecsCmd.AddCommand(ecsStatusCmd)
 	ecsCmd.AddCommand(ecsExecCmd)
 	ecsCmd.AddCommand(ecsPrewarmCmd)
+	ecsCmd.AddCommand(ecsCleanupCmd)
 
 	// Prewarm command flags
 	ecsPrewarmCmd.Flags().IntVar(&prewarmWorkers, "workers", 4, "Number of worktrees to create")
@@ -580,6 +581,17 @@ func runECSStop(cmd *cobra.Command, args []string) error {
 	}
 
 	if isProfile {
+		// Clean up ALB resources (listener rules + target groups)
+		albMgr, albErr := alb.NewManager(ctx)
+		if albErr == nil {
+			fmt.Printf("  Cleaning up ALB resources...\n")
+			if err := albMgr.DeleteAllListenerRules(ctx, arg); err != nil {
+				fmt.Printf("  Warning: Failed to delete listener rules: %v\n", err)
+			}
+			if err := albMgr.DeleteAllTargetGroups(ctx, arg); err != nil {
+				fmt.Printf("  Warning: Failed to delete target groups: %v\n", err)
+			}
+		}
 		fmt.Printf("%s Profile %q stopped\n", color.GreenString("✓"), arg)
 	} else {
 		fmt.Printf("%s Task %s stopped\n", color.GreenString("✓"), taskID)
@@ -1014,6 +1026,96 @@ func runECSExec(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute command: %w\n\nMake sure you have:\n1. AWS CLI installed\n2. Session Manager plugin installed (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)", err)
 	}
 
+	return nil
+}
+
+// ============================================================================
+// ecs cleanup - Remove orphaned ALB resources
+// ============================================================================
+
+var ecsCleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove orphaned ALB target groups and listener rules",
+	Long: `Find and remove ALB target groups and listener rules that belong to
+profiles without running tasks.
+
+These orphans accumulate when tasks are stopped without cleaning up ALB
+resources. This command identifies them and removes them.`,
+	RunE: runECSCleanup,
+}
+
+func runECSCleanup(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	// Get running tasks to build set of active profiles
+	client, err := getECSClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	listResult, err := client.ListTasks(ctx, &ecs.ListTasksInput{
+		Cluster: aws.String(ecsCluster),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	runningProfiles := make(map[string]bool)
+
+	if len(listResult.TaskArns) > 0 {
+		descResult, err := client.DescribeTasks(ctx, &ecs.DescribeTasksInput{
+			Cluster: aws.String(ecsCluster),
+			Tasks:   listResult.TaskArns,
+			Include: []types.TaskField{types.TaskFieldTags},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to describe tasks: %w", err)
+		}
+
+		for _, task := range descResult.Tasks {
+			for _, tag := range task.Tags {
+				if aws.ToString(tag.Key) == "frank-profile" {
+					runningProfiles[aws.ToString(tag.Value)] = true
+				}
+			}
+		}
+	}
+
+	fmt.Printf("Found %d running profile(s)\n", len(runningProfiles))
+
+	// Find orphaned target groups
+	albMgr, err := alb.NewManager(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create ALB manager: %w", err)
+	}
+
+	orphans, err := albMgr.FindOrphanedTargetGroups(ctx, runningProfiles)
+	if err != nil {
+		return fmt.Errorf("failed to find orphaned target groups: %w", err)
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("%s No orphaned ALB resources found\n", color.GreenString("✓"))
+		return nil
+	}
+
+	fmt.Printf("Found %d orphaned profile(s): %s\n", len(orphans), strings.Join(orphans, ", "))
+
+	// Delete orphaned resources
+	deleted := 0
+	for _, profileName := range orphans {
+		fmt.Printf("  Cleaning up %q...\n", profileName)
+		if err := albMgr.DeleteAllListenerRules(ctx, profileName); err != nil {
+			fmt.Printf("    Warning: Failed to delete listener rules: %v\n", err)
+		}
+		if err := albMgr.DeleteAllTargetGroups(ctx, profileName); err != nil {
+			fmt.Printf("    Warning: Failed to delete target groups: %v\n", err)
+		} else {
+			deleted++
+		}
+	}
+
+	fmt.Printf("%s Cleaned up %d orphaned profile(s)\n", color.GreenString("✓"), deleted)
 	return nil
 }
 
