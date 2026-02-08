@@ -997,7 +997,7 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
             ['tmux', 'send-keys', '-t', session, 'C-c'],
             capture_output=True, text=True, timeout=5
         )
-        time.sleep(0.1)  # Let terminal process the cancel
+        time.sleep(0.3)  # Let terminal process the cancel and return to prompt
         subprocess.run(
             ['tmux', 'send-keys', '-t', session, 'C-u'],
             capture_output=True, text=True, timeout=5
@@ -1031,6 +1031,7 @@ def send_to_tmux(text, session='frank-claude', auto_submit=False):
 
         # Optionally press Enter to submit
         if auto_submit:
+            time.sleep(0.15)  # Let terminal process pasted text before submitting
             result = subprocess.run(
                 ['tmux', 'send-keys', '-t', session, 'Enter'],
                 capture_output=True, text=True, timeout=5
