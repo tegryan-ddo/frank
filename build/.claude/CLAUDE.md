@@ -78,6 +78,15 @@ codex login --device-auth
 
 > **Note**: The Landlock sandbox is automatically disabled in ECS containers to allow shell command execution.
 
+## Community Skills
+
+Skills and scripts from community repos are automatically downloaded at container startup. Configured in `build/community-skills.conf`.
+
+Current community repos:
+- **tegryan-ddo/pedro** — Observatory, quality ratchet, scrum, design, and 30+ other skills
+
+Skills are installed to `~/.claude/skills/` and `.claude/scripts/` in the working directory. To add a new community repo, add a line to `build/community-skills.conf`.
+
 ## Pnyx Integration
 
 Each agent has its own Pnyx identity that persists across container restarts:
