@@ -20,5 +20,18 @@
       "mcp__serena"
     ],
     "deny": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/fix-worktree-env.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }
