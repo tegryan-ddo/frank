@@ -333,42 +333,62 @@ install_worktree_hook() {
 }
 
 # Copy .claude directory from base repo to worktree for hooks/settings
+# Uses merge strategy: copies base repo files without destroying worktree-specific
+# content (e.g., hooks that exist in the checked-out branch but not the base).
 # Note: We copy instead of symlink because hooks use $CLAUDE_PROJECT_DIR paths
-# which don't resolve correctly through symlinks
+# which don't resolve correctly through symlinks.
 copy_claude_directory() {
     local worktree_path="$1"
     local base_repo="$2"
 
     # Check if base repo has .claude directory
     if [ -d "$base_repo/.claude" ]; then
-        # Remove existing .claude in worktree (symlink or directory)
-        if [ -e "$worktree_path/.claude" ] || [ -L "$worktree_path/.claude" ]; then
-            echo "Removing existing .claude in worktree"
-            rm -rf "$worktree_path/.claude"
+        # If worktree has a symlink, replace it entirely
+        if [ -L "$worktree_path/.claude" ]; then
+            echo "Removing .claude symlink in worktree"
+            rm -f "$worktree_path/.claude"
         fi
 
-        # Copy the .claude directory
-        echo "Copying .claude directory to worktree: $base_repo/.claude -> $worktree_path/.claude"
-        cp -r "$base_repo/.claude" "$worktree_path/.claude"
+        # Merge: copy base repo .claude/ into worktree without deleting existing files.
+        # The -r flag copies recursively, and we overwrite base repo versions but keep
+        # worktree-only files (like hooks from the checked-out branch).
+        echo "Merging .claude directory into worktree: $base_repo/.claude -> $worktree_path/.claude"
+        mkdir -p "$worktree_path/.claude"
+        cp -r "$base_repo/.claude/"* "$worktree_path/.claude/" 2>/dev/null || true
+        # Also copy hidden files
+        cp -r "$base_repo/.claude/".* "$worktree_path/.claude/" 2>/dev/null || true
+
+        # Fix hook script permissions — hooks must be executable
+        if [ -d "$worktree_path/.claude/hooks" ]; then
+            find "$worktree_path/.claude/hooks" -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} \; 2>/dev/null || true
+            local hook_count
+            hook_count=$(find "$worktree_path/.claude/hooks" -type f 2>/dev/null | wc -l)
+            echo "  Fixed permissions on $hook_count hook file(s)"
+        fi
 
         # Force sync to ensure EFS has propagated the files
         sync
 
         # Verify the copy succeeded
         if [ -d "$worktree_path/.claude" ]; then
-            echo "  .claude directory copied successfully"
+            echo "  .claude directory merged successfully"
             if [ -d "$worktree_path/.claude/commands" ]; then
                 local cmd_count=$(ls -1 "$worktree_path/.claude/commands" 2>/dev/null | wc -l)
                 echo "  Found $cmd_count command(s) in .claude/commands/"
-                ls -la "$worktree_path/.claude/commands/" 2>/dev/null || true
-            else
-                echo "  WARNING: No .claude/commands directory found"
+            fi
+            if [ -d "$worktree_path/.claude/hooks" ]; then
+                echo "  Found hooks directory"
             fi
         else
             echo "  ERROR: Failed to copy .claude directory!"
         fi
     else
         echo "No .claude directory in base repo - skipping copy"
+        # Even without a base repo .claude/, the worktree might have one from git checkout.
+        # Ensure hook permissions are still fixed.
+        if [ -d "$worktree_path/.claude/hooks" ]; then
+            find "$worktree_path/.claude/hooks" -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} \; 2>/dev/null || true
+        fi
     fi
 }
 # Check if container name has worker ID suffix (e.g., enkai-1 -> profile=enkai, worker=1)
@@ -566,11 +586,25 @@ fi
 cd "$WORK_DIR"
 echo "Current directory: $(pwd)"
 
+# Export CLAUDE_PROJECT_DIR so hooks resolve paths correctly in worktrees.
+# Claude Code has known issues where CLAUDE_PROJECT_DIR is empty or points
+# to the base repo instead of the worktree (GH issues #9447, #12885, #16089).
+export CLAUDE_PROJECT_DIR="$WORK_DIR"
+echo "CLAUDE_PROJECT_DIR=$CLAUDE_PROJECT_DIR"
+
 # Copy baked-in skills to working directory (e.g., Pnyx)
 if [ -d "/root/.claude/skills" ]; then
     mkdir -p "$WORK_DIR/.claude/skills"
     cp -r /root/.claude/skills/* "$WORK_DIR/.claude/skills/" 2>/dev/null || true
     echo "Copied baked-in skills to $WORK_DIR/.claude/skills/"
+fi
+
+# Copy baked-in hooks to working directory (e.g., worktree env fix)
+if [ -d "/root/.claude/hooks" ]; then
+    mkdir -p "$WORK_DIR/.claude/hooks"
+    cp -rn /root/.claude/hooks/* "$WORK_DIR/.claude/hooks/" 2>/dev/null || true
+    chmod +x "$WORK_DIR/.claude/hooks/"*.sh 2>/dev/null || true
+    echo "Copied baked-in hooks to $WORK_DIR/.claude/hooks/"
 fi
 
 # Copy community skills and scripts to working directory
