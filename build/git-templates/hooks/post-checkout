@@ -1,0 +1,29 @@
+#!/bin/bash
+# post-checkout hook: copies .claude/ directory into new git worktrees
+# Fixes: hooks using relative paths (e.g., .claude/hooks/...) fail in worktrees
+# because .claude/ lives in the main working tree, not the worktree.
+#
+# Git runs post-checkout after `git worktree add` with args:
+#   $1 = previous HEAD (0{40} for new worktree)
+#   $2 = new HEAD
+#   $3 = 1 if branch checkout, 0 if file checkout
+
+# Only act on branch checkouts (not file checkouts)
+[ "$3" = "1" ] || exit 0
+
+# Only act if we're in a worktree (not the main working tree)
+MAIN_WORKTREE=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||')
+CURRENT_WORKTREE=$(git rev-parse --show-toplevel 2>/dev/null)
+
+# If we can't determine paths, bail silently
+[ -z "$MAIN_WORKTREE" ] || [ -z "$CURRENT_WORKTREE" ] && exit 0
+
+# If this IS the main worktree, nothing to copy
+[ "$MAIN_WORKTREE" = "$CURRENT_WORKTREE" ] && exit 0
+
+# If main worktree has .claude/ and current worktree doesn't, copy it
+if [ -d "$MAIN_WORKTREE/.claude" ] && [ ! -d "$CURRENT_WORKTREE/.claude" ]; then
+    cp -r "$MAIN_WORKTREE/.claude" "$CURRENT_WORKTREE/.claude"
+fi
+
+exit 0
