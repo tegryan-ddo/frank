@@ -300,6 +300,10 @@ install_plugins() {
 # Clone plugins repo early (must complete before Claude starts)
 clone_plugins_repo
 
+# Sync community skills from GitHub repos (e.g., tegryan-ddo/pedro)
+source /usr/local/bin/install-community-skills.sh
+sync_community_skills
+
 # -----------------------------------------------------------------------------
 # Worktree Setup
 # Creates worktrees for container isolation - works with both:
@@ -568,6 +572,9 @@ if [ -d "/root/.claude/skills" ]; then
     cp -r /root/.claude/skills/* "$WORK_DIR/.claude/skills/" 2>/dev/null || true
     echo "Copied baked-in skills to $WORK_DIR/.claude/skills/"
 fi
+
+# Copy community skills and scripts to working directory
+copy_community_skills_to_workdir "$WORK_DIR"
 
 # Install and register plugins now that we know the working directory
 install_plugins "$WORK_DIR"

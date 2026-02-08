@@ -136,6 +136,15 @@ Worker nodes come pre-configured with the following MCP servers:
 | context7 | `@upstash/context7-mcp` | Up-to-date library documentation |
 | serena | `serena` | Semantic code analysis |
 
+## Community Skills
+
+Skills and scripts from community repos are automatically downloaded at container startup. Configured in `build/community-skills.conf`.
+
+Current community repos:
+- **tegryan-ddo/pedro** — Observatory, quality ratchet, scrum, design, and 30+ other skills
+
+Skills are installed to `~/.claude/skills/` and `.claude/scripts/` in the working directory.
+
 ## Claude Code Plugins
 
 Plugins are automatically installed from [claude-plugins-official](https://github.com/anthropics/claude-plugins-official) at container startup.
