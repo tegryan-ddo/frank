@@ -114,7 +114,7 @@ gh_monitor_state = {
     'last_result': None,
     'timer_thread': None,
     'stop_event': None,
-    'processed_issues': set(),  # Issue numbers already sent to Claude
+    'processed_issues': set(),  # "owner/repo#number" strings already sent to Claude
 }
 gh_monitor_lock = threading.Lock()
 
@@ -409,61 +409,119 @@ def get_gh_repo():
     return None
 
 
+ENKAI_LABELS = ['enkai:research', 'enkai:design', 'enkai:plan', 'enkai:build']
+
+ENKAI_PROMPTS = {
+    'enkai:research': (
+        "This is a **research** task. Please:\n"
+        "- Deep-dive into the topic described in this issue\n"
+        "- Investigate relevant documentation, code, and prior art\n"
+        "- Produce findings with key insights and actionable recommendations\n"
+        "- Post your findings as a comment on the issue"
+    ),
+    'enkai:design': (
+        "This is a **design** task. Please:\n"
+        "- Analyze the requirements described in this issue\n"
+        "- Propose an architecture or design approach\n"
+        "- Identify tradeoffs between alternatives\n"
+        "- Document your design with diagrams or structured notes as an issue comment"
+    ),
+    'enkai:plan': (
+        "This is a **planning** task. Please:\n"
+        "- Create a detailed implementation plan for this issue\n"
+        "- Break it down into concrete steps with files to modify\n"
+        "- Define acceptance criteria for each step\n"
+        "- Post the plan as a comment on the issue"
+    ),
+    'enkai:build': (
+        "This is a **build** task. Please:\n"
+        "- Implement the changes described in this issue\n"
+        "- Write code, run tests, and verify correctness\n"
+        "- Create a pull request with your changes\n"
+        "- Link the PR to the issue"
+    ),
+}
+
+
+def get_task_prompt(issue, repo):
+    """Build a label-aware prompt for an enkai-labeled issue."""
+    labels = [l.get('name', '') for l in issue.get('labels', [])]
+    body = issue.get('body', '') or '(no description)'
+
+    # Find the matching enkai label
+    matched_label = None
+    for label in labels:
+        if label in ENKAI_PROMPTS:
+            matched_label = label
+            break
+
+    task_instructions = ENKAI_PROMPTS.get(matched_label, 'Please work on this GitHub issue.')
+    all_labels = ', '.join(labels)
+
+    return (
+        f"{task_instructions}\n\n"
+        f"Issue #{issue['number']}: {issue['title']}\n"
+        f"Labels: {all_labels}\n"
+        f"Repository: {repo}\n\n"
+        f"{body}\n\n"
+        f"When done, close the issue with: gh issue close {issue['number']} --repo {repo}"
+    )
+
+
 def check_github_issues():
     """
-    Check GitHub for open issues with labels prefixed 'enkai:'.
+    Check GitHub for open issues with enkai: labels across all accessible repos.
     If Claude is idle, send one unprocessed issue as a prompt.
     """
     import subprocess
 
-    repo = get_gh_repo()
-    if not repo:
+    log("GH monitor: searching issues across all repos...")
+
+    # Search for each enkai label across all accessible repos
+    all_issues = {}  # keyed by "owner/repo#number" to deduplicate
+    errors = []
+
+    for label in ENKAI_LABELS:
+        try:
+            result = subprocess.run(
+                ['gh', 'search', 'issues', '--label', label,
+                 '--state', 'open', '--json', 'repository,number,title,body,labels',
+                 '--limit', '10'],
+                capture_output=True, text=True, timeout=30
+            )
+
+            if result.returncode != 0:
+                errors.append(f'{label}: {result.stderr.strip()[:80]}')
+                continue
+
+            issues = json.loads(result.stdout) if result.stdout.strip() else []
+            for issue in issues:
+                repo_name = issue.get('repository', {}).get('nameWithOwner', '')
+                if not repo_name:
+                    continue
+                key = f"{repo_name}#{issue['number']}"
+                if key not in all_issues:
+                    all_issues[key] = {**issue, '_repo': repo_name, '_key': key}
+
+        except subprocess.TimeoutExpired:
+            errors.append(f'{label}: timed out')
+        except Exception as e:
+            errors.append(f'{label}: {e}')
+
+    if errors and not all_issues:
         return {
             'timestamp': datetime.now().isoformat(),
-            'error': 'No GIT_REPO configured',
+            'error': '; '.join(errors),
             'issues_found': 0,
             'sent': False,
         }
 
-    log(f"GH monitor: checking issues for {repo}...")
-
-    try:
-        result = subprocess.run(
-            ['gh', 'issue', 'list', '--repo', repo,
-             '--search', 'label:enkai:', '--json', 'number,title,body,labels',
-             '--state', 'open'],
-            capture_output=True, text=True, timeout=30
-        )
-
-        if result.returncode != 0:
-            log(f"GH monitor: gh cli error: {result.stderr}")
-            return {
-                'timestamp': datetime.now().isoformat(),
-                'error': f'gh cli error: {result.stderr.strip()[:100]}',
-                'issues_found': 0,
-                'sent': False,
-            }
-
-        issues = json.loads(result.stdout) if result.stdout.strip() else []
-    except subprocess.TimeoutExpired:
-        return {
-            'timestamp': datetime.now().isoformat(),
-            'error': 'gh cli timed out',
-            'issues_found': 0,
-            'sent': False,
-        }
-    except Exception as e:
-        return {
-            'timestamp': datetime.now().isoformat(),
-            'error': str(e),
-            'issues_found': 0,
-            'sent': False,
-        }
+    issues = list(all_issues.values())
 
     # Filter out already-processed issues
     with gh_monitor_lock:
         processed = gh_monitor_state['processed_issues']
-        new_issues = [i for i in issues if i['number'] not in processed]
+        new_issues = [i for i in issues if i['_key'] not in processed]
 
     if not new_issues:
         return {
@@ -501,34 +559,28 @@ def check_github_issues():
 
     # Process one issue per tick
     issue = new_issues[0]
-    labels = ', '.join(l.get('name', '') for l in issue.get('labels', []))
-    body = issue.get('body', '') or '(no description)'
-
-    prompt = (
-        f"Please work on this GitHub issue:\n\n"
-        f"Issue #{issue['number']}: {issue['title']}\n"
-        f"Labels: {labels}\n"
-        f"Repository: {repo}\n\n"
-        f"{body}\n\n"
-        f"When done, close the issue with: gh issue close {issue['number']} --repo {repo}"
-    )
+    repo = issue['_repo']
+    prompt = get_task_prompt(issue, repo)
 
     success = send_to_tmux(prompt, session='frank-claude', auto_submit=True)
 
+    issue_key = issue['_key']
     if success:
         with gh_monitor_lock:
-            gh_monitor_state['processed_issues'].add(issue['number'])
-        log(f"GH monitor: sent issue #{issue['number']} to Claude")
+            gh_monitor_state['processed_issues'].add(issue_key)
+        log(f"GH monitor: sent {issue_key} to Claude")
     else:
-        log(f"GH monitor: failed to send issue #{issue['number']}")
+        log(f"GH monitor: failed to send {issue_key}")
 
     return {
         'timestamp': datetime.now().isoformat(),
         'issues_found': len(issues),
         'new_issues': len(new_issues),
         'sent': success,
+        'issue_key': issue_key,
         'issue_number': issue['number'],
         'issue_title': issue['title'],
+        'issue_repo': repo,
         'claude_state': state,
     }
 
@@ -614,8 +666,7 @@ def get_gh_monitor_status():
             'last_check': gh_monitor_state['last_check'],
             'last_result': gh_monitor_state['last_result'],
             'processed_count': len(gh_monitor_state['processed_issues']),
-            'has_repo': get_gh_repo() is not None,
-            'repo': get_gh_repo(),
+            'labels': ENKAI_LABELS,
         }
 
         if gh_monitor_state['next_check']:
