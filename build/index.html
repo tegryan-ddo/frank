@@ -524,7 +524,7 @@
             border-color: #f44747;
         }
 
-        .gh-monitor-btn.no-repo {
+        .gh-monitor-btn.no-match {
             opacity: 0.4;
             cursor: not-allowed;
         }
@@ -1480,7 +1480,7 @@
             <button class="restart-btn" id="restart-btn" title="Stop and restart this profile to apply the update">Restart</button>
         </div>
         <div class="header-right">
-            <button class="gh-monitor-btn" id="gh-monitor-toggle" title="Monitor GitHub issues labeled enkai:">Check GH</button>
+            <button class="gh-monitor-btn" id="gh-monitor-toggle" title="Monitor GitHub issues labeled enkai:research/design/plan/build across all repos">Check GH</button>
             <span class="user-badge" id="user-badge">
                 <span class="user-icon">&#x1F464;</span>
                 <span id="user-name"></span>
@@ -1663,8 +1663,8 @@
                             <span class="tick-status-value" id="gh-status-text">Stopped</span>
                         </div>
                         <div class="tick-status-row">
-                            <span class="tick-status-label">Repo:</span>
-                            <span class="tick-status-value" id="gh-repo-text">-</span>
+                            <span class="tick-status-label">Scope:</span>
+                            <span class="tick-status-value" id="gh-scope-text">All repos</span>
                         </div>
                         <div class="tick-status-row">
                             <span class="tick-status-label">Processed:</span>
@@ -1679,10 +1679,7 @@
                             <span class="tick-status-value" id="gh-last-result">-</span>
                         </div>
                     </div>
-                    <div class="pnyx-tick-no-creds" id="gh-no-repo" style="display: none;">
-                        <span class="warning-icon">&#x26A0;</span>
-                        No GIT_REPO configured
-                    </div>
+                    <!-- Labels: research, design, plan, build -->
                 </div>
 
                 <!-- Feedback Section -->
@@ -2962,13 +2959,12 @@
             const intervalSelect = document.getElementById('gh-monitor-interval');
             const nowBtn = document.getElementById('gh-monitor-now');
             const statusText = document.getElementById('gh-status-text');
-            const repoText = document.getElementById('gh-repo-text');
+            const scopeText = document.getElementById('gh-scope-text');
             const processedCount = document.getElementById('gh-processed-count');
             const nextRow = document.getElementById('gh-next-row');
             const nextTime = document.getElementById('gh-next-time');
             const lastRow = document.getElementById('gh-last-row');
             const lastResult = document.getElementById('gh-last-result');
-            const noRepo = document.getElementById('gh-no-repo');
 
             let isRunning = false;
             let pollInterval = null;
@@ -2985,7 +2981,10 @@
                 if (!result) return '-';
                 if (result.error) return `Error: ${result.error.substring(0, 40)}`;
                 if (result.skipped) return `Skipped: ${result.reason || 'busy'}`;
-                if (result.sent) return `Sent #${result.issue_number}: ${(result.issue_title || '').substring(0, 30)}`;
+                if (result.sent) {
+                    const repo = result.issue_repo ? result.issue_repo.split('/').pop() + ' ' : '';
+                    return `Sent ${repo}#${result.issue_number}: ${(result.issue_title || '').substring(0, 25)}`;
+                }
                 if (result.sent === false && result.new_issues === 0) return `${result.issues_found || 0} issues, none new`;
                 if (result.sent === false) return 'Failed to send';
                 return '-';
@@ -3013,8 +3012,8 @@
                     statusText.className = 'tick-status-value stopped';
                 }
 
-                // Repo info
-                repoText.textContent = status.repo || '-';
+                // Scope info
+                scopeText.textContent = 'All repos';
                 processedCount.textContent = status.processed_count || 0;
 
                 // Next check time
@@ -3034,20 +3033,10 @@
                     lastRow.style.display = 'none';
                 }
 
-                // Show/hide no-repo warning
-                if (!status.has_repo) {
-                    noRepo.style.display = 'flex';
-                    headerBtn.classList.add('no-repo');
-                    headerBtn.disabled = true;
-                    panelToggleBtn.disabled = true;
-                    nowBtn.disabled = true;
-                } else {
-                    noRepo.style.display = 'none';
-                    headerBtn.classList.remove('no-repo');
-                    headerBtn.disabled = false;
-                    panelToggleBtn.disabled = false;
-                    nowBtn.disabled = false;
-                }
+                // All repos mode - always enabled
+                headerBtn.disabled = false;
+                panelToggleBtn.disabled = false;
+                nowBtn.disabled = false;
             }
 
             async function fetchStatus() {
