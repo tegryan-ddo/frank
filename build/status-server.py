@@ -178,11 +178,10 @@ def log(msg):
 # Claude Idle Detection
 # =========================================================================
 
-def is_claude_idle(session='frank-claude'):
+def _check_tmux_idle(session='frank-claude'):
     """
-    Check if Claude Code is idle (waiting for user input) by inspecting
-    the tmux pane content. When idle, Claude shows the ❯ prompt character.
-    When busy, it shows a spinner like ✽ Ionizing... or streaming output.
+    Check if Claude Code shows the idle prompt (❯) in the tmux pane.
+    Returns True if the prompt is found, False otherwise.
     """
     import subprocess
 
@@ -217,8 +216,83 @@ def is_claude_idle(session='frank-claude'):
         return False
 
     except Exception as e:
-        log(f"Error checking Claude idle state: {e}")
+        log(f"Error checking tmux idle state: {e}")
         return False
+
+
+def _check_jsonl_idle(stale_seconds=10):
+    """
+    Check if Claude Code is idle by examining the JSONL conversation file.
+    Claude is considered idle if:
+    - The JSONL file hasn't been modified for at least stale_seconds AND
+    - The last message in the file is from the assistant (Claude finished its turn)
+
+    Returns True if idle, False if busy, None if unable to determine.
+    """
+    try:
+        claude_dir = Path.home() / '.claude'
+        conversation_files = find_jsonl_files(claude_dir)
+        if not conversation_files:
+            return None
+
+        latest = max(conversation_files, key=lambda p: p.stat().st_mtime)
+        age = time.time() - latest.stat().st_mtime
+
+        # If the file was modified very recently, Claude is likely still streaming
+        if age < stale_seconds:
+            return False
+
+        # Check the last message type - if assistant, Claude finished its turn
+        last_type = None
+        with open(latest, 'r') as f:
+            # Read from end to find last non-empty line efficiently
+            f.seek(0, 2)  # Seek to end
+            file_size = f.tell()
+            # Read last 4KB to find the last complete line
+            read_size = min(4096, file_size)
+            f.seek(file_size - read_size)
+            tail = f.read()
+            lines = [l.strip() for l in tail.split('\n') if l.strip()]
+            if lines:
+                try:
+                    last_msg = json.loads(lines[-1])
+                    last_type = last_msg.get('type')
+                except json.JSONDecodeError:
+                    pass
+
+        if last_type == 'assistant':
+            return True
+
+        return False
+
+    except Exception as e:
+        log(f"Error checking JSONL idle state: {e}")
+        return None
+
+
+def is_claude_idle(session='frank-claude'):
+    """
+    Check if Claude Code is idle (waiting for user input).
+
+    Uses two independent detection methods:
+    1. Tmux pane: looks for the ❯ prompt character
+    2. JSONL file: checks if the conversation file is stale and last message
+       is from the assistant
+
+    Returns True if EITHER method detects idle state, making detection more
+    resilient to edge cases in any single method.
+    """
+    tmux_idle = _check_tmux_idle(session)
+    jsonl_idle = _check_jsonl_idle()
+
+    # Either signal is sufficient to consider Claude idle
+    idle = tmux_idle or (jsonl_idle is True)
+
+    # Log for debugging when the two methods disagree
+    if tmux_idle != jsonl_idle and jsonl_idle is not None:
+        log(f"Idle detection: tmux={tmux_idle} jsonl={jsonl_idle} -> {idle}")
+
+    return idle
 
 
 def is_prompt_textbox_empty():
