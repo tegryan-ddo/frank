@@ -1480,7 +1480,7 @@
             <button class="restart-btn" id="restart-btn" title="Stop and restart this profile to apply the update">Restart</button>
         </div>
         <div class="header-right">
-            <button class="gh-monitor-btn" id="gh-monitor-toggle" title="Monitor GitHub issues labeled enkai:research/design/plan/build across all repos">Check GH</button>
+            <button class="gh-monitor-btn" id="gh-monitor-toggle" title="Monitor GitHub issues with configured labels across all repos">Check GH</button>
             <span class="user-badge" id="user-badge">
                 <span class="user-icon">&#x1F464;</span>
                 <span id="user-name"></span>
@@ -1663,12 +1663,16 @@
                             <span class="tick-status-value" id="gh-status-text">Stopped</span>
                         </div>
                         <div class="tick-status-row">
-                            <span class="tick-status-label">Scope:</span>
-                            <span class="tick-status-value" id="gh-scope-text">All repos</span>
+                            <span class="tick-status-label">Labels:</span>
+                            <span class="tick-status-value" id="gh-labels-text" style="font-size: 11px; opacity: 0.8;">-</span>
                         </div>
                         <div class="tick-status-row">
                             <span class="tick-status-label">Processed:</span>
                             <span class="tick-status-value" id="gh-processed-count">0</span>
+                        </div>
+                        <div class="tick-status-row" id="gh-ratelimit-row" style="display: none;">
+                            <span class="tick-status-label">API:</span>
+                            <span class="tick-status-value" id="gh-ratelimit-text">-</span>
                         </div>
                         <div class="tick-status-row" id="gh-next-row" style="display: none;">
                             <span class="tick-status-label">Next:</span>
@@ -1679,7 +1683,7 @@
                             <span class="tick-status-value" id="gh-last-result">-</span>
                         </div>
                     </div>
-                    <!-- Labels: research, design, plan, build -->
+                    <!-- Labels configured via GH_MONITOR_LABELS env var or CONTAINER_NAME -->
                 </div>
 
                 <!-- Feedback Section -->
@@ -2959,12 +2963,14 @@
             const intervalSelect = document.getElementById('gh-monitor-interval');
             const nowBtn = document.getElementById('gh-monitor-now');
             const statusText = document.getElementById('gh-status-text');
-            const scopeText = document.getElementById('gh-scope-text');
+            const labelsText = document.getElementById('gh-labels-text');
             const processedCount = document.getElementById('gh-processed-count');
             const nextRow = document.getElementById('gh-next-row');
             const nextTime = document.getElementById('gh-next-time');
             const lastRow = document.getElementById('gh-last-row');
             const lastResult = document.getElementById('gh-last-result');
+            const rateLimitRow = document.getElementById('gh-ratelimit-row');
+            const rateLimitText = document.getElementById('gh-ratelimit-text');
 
             let isRunning = false;
             let pollInterval = null;
@@ -2979,6 +2985,7 @@
 
             function formatLastResult(result) {
                 if (!result) return '-';
+                if (result.backoff) return `Backing off: ${result.reason || 'rate limited'}`;
                 if (result.error) return `Error: ${result.error.substring(0, 40)}`;
                 if (result.skipped) return `Skipped: ${result.reason || 'busy'}`;
                 if (result.sent) {
@@ -3012,9 +3019,23 @@
                     statusText.className = 'tick-status-value stopped';
                 }
 
-                // Scope info
-                scopeText.textContent = 'All repos';
+                // Labels info
+                if (status.labels && status.labels.length) {
+                    labelsText.textContent = status.labels.map(l => l.split(':').pop()).join(', ');
+                    labelsText.title = status.labels.join(', ');
+                }
                 processedCount.textContent = status.processed_count || 0;
+
+                // Rate limit info
+                if (status.rate_limit) {
+                    rateLimitRow.style.display = 'flex';
+                    const rl = status.rate_limit;
+                    const pct = rl.limit > 0 ? Math.round(rl.remaining / rl.limit * 100) : 0;
+                    rateLimitText.textContent = `${rl.remaining}/${rl.limit} (${pct}%)`;
+                    rateLimitText.style.color = rl.remaining < 100 ? '#f44747' : rl.remaining < 500 ? '#dcdcaa' : '';
+                } else {
+                    rateLimitRow.style.display = 'none';
+                }
 
                 // Next check time
                 if (status.next_check_in_seconds !== null && status.next_check_in_seconds !== undefined) {

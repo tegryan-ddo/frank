@@ -106,6 +106,8 @@ pnyx_tick_state = {
 pnyx_tick_lock = threading.Lock()
 
 # GitHub issue monitor state
+GH_MONITOR_STATE_FILE = '/tmp/gh-monitor-state.json'
+
 gh_monitor_state = {
     'enabled': False,
     'interval_seconds': 120,  # 2 minutes default
@@ -114,9 +116,47 @@ gh_monitor_state = {
     'last_result': None,
     'timer_thread': None,
     'stop_event': None,
-    'processed_issues': set(),  # "owner/repo#number" strings already sent to Claude
+    'processed_issues': {},  # "owner/repo#number" -> {"processed_at": ..., "updated_at": ...}
+    'backoff_until': None,   # Timestamp until which we should back off (rate limit/error recovery)
+    'backoff_count': 0,      # Number of consecutive errors for exponential backoff
+    'rate_limit': None,      # Last known rate limit info
 }
 gh_monitor_lock = threading.Lock()
+
+
+def _save_gh_monitor_state():
+    """Persist processed issues to disk so they survive container restarts."""
+    try:
+        with gh_monitor_lock:
+            data = {
+                'processed_issues': gh_monitor_state['processed_issues'],
+                'saved_at': datetime.now().isoformat(),
+            }
+        with open(GH_MONITOR_STATE_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        log(f"GH monitor: failed to save state: {e}")
+
+
+def _load_gh_monitor_state():
+    """Load processed issues from disk on startup."""
+    try:
+        if os.path.exists(GH_MONITOR_STATE_FILE):
+            with open(GH_MONITOR_STATE_FILE, 'r') as f:
+                data = json.load(f)
+            processed = data.get('processed_issues', {})
+            # Migrate from old set format (list of strings) to dict format
+            if isinstance(processed, list):
+                processed = {k: {'processed_at': data.get('saved_at', datetime.now().isoformat())} for k in processed}
+            with gh_monitor_lock:
+                gh_monitor_state['processed_issues'] = processed
+            log(f"GH monitor: loaded {len(processed)} processed issues from disk")
+    except Exception as e:
+        log(f"GH monitor: failed to load state: {e}")
+
+
+# Load persisted state on module init
+_load_gh_monitor_state()
 
 # Prompt textbox state (reported by web UI)
 prompt_textbox_state = {
@@ -409,31 +449,44 @@ def get_gh_repo():
     return None
 
 
-ENKAI_LABELS = ['enkai:research', 'enkai:design', 'enkai:plan', 'enkai:build']
+# Configurable labels: read from GH_MONITOR_LABELS env var, or derive from container name.
+# Format: comma-separated label names, e.g. "enkai:research,enkai:design,enkai:plan,enkai:build"
+# If not set, defaults to {CONTAINER_NAME}:research, {CONTAINER_NAME}:design, etc.
+def _get_gh_monitor_labels():
+    env_labels = os.environ.get('GH_MONITOR_LABELS', '').strip()
+    if env_labels:
+        return [l.strip() for l in env_labels.split(',') if l.strip()]
+    # Derive from container name
+    prefix = os.environ.get('CONTAINER_NAME', 'frank').split('-')[0]  # e.g. "enkai-1" -> "enkai"
+    return [f'{prefix}:research', f'{prefix}:design', f'{prefix}:plan', f'{prefix}:build']
 
-ENKAI_PROMPTS = {
-    'enkai:research': (
+
+GH_MONITOR_LABELS = _get_gh_monitor_labels()
+
+# Task type keywords (extracted from label suffix after the colon)
+TASK_PROMPTS = {
+    'research': (
         "This is a **research** task. Please:\n"
         "- Deep-dive into the topic described in this issue\n"
         "- Investigate relevant documentation, code, and prior art\n"
         "- Produce findings with key insights and actionable recommendations\n"
         "- Post your findings as a comment on the issue"
     ),
-    'enkai:design': (
+    'design': (
         "This is a **design** task. Please:\n"
         "- Analyze the requirements described in this issue\n"
         "- Propose an architecture or design approach\n"
         "- Identify tradeoffs between alternatives\n"
         "- Document your design with diagrams or structured notes as an issue comment"
     ),
-    'enkai:plan': (
+    'plan': (
         "This is a **planning** task. Please:\n"
         "- Create a detailed implementation plan for this issue\n"
         "- Break it down into concrete steps with files to modify\n"
         "- Define acceptance criteria for each step\n"
         "- Post the plan as a comment on the issue"
     ),
-    'enkai:build': (
+    'build': (
         "This is a **build** task. Please:\n"
         "- Implement the changes described in this issue\n"
         "- Write code, run tests, and verify correctness\n"
@@ -444,18 +497,24 @@ ENKAI_PROMPTS = {
 
 
 def get_task_prompt(issue, repo):
-    """Build a label-aware prompt for an enkai-labeled issue."""
+    """Build a label-aware prompt for a monitored issue."""
     labels = [l.get('name', '') for l in issue.get('labels', [])]
     body = issue.get('body', '') or '(no description)'
 
-    # Find the matching enkai label
-    matched_label = None
-    for label in labels:
-        if label in ENKAI_PROMPTS:
-            matched_label = label
-            break
+    # Sanitize body: truncate to 4000 chars, strip HTML tags
+    body = re.sub(r'<[^>]+>', '', body)  # Strip HTML
+    if len(body) > 4000:
+        body = body[:4000] + '\n\n... (truncated)'
 
-    task_instructions = ENKAI_PROMPTS.get(matched_label, 'Please work on this GitHub issue.')
+    # Find matching task type from label suffix (e.g., "enkai:build" -> "build")
+    task_instructions = 'Please work on this GitHub issue.'
+    for label in labels:
+        if ':' in label:
+            task_type = label.split(':', 1)[1]
+            if task_type in TASK_PROMPTS:
+                task_instructions = TASK_PROMPTS[task_type]
+                break
+
     all_labels = ', '.join(labels)
 
     return (
@@ -468,25 +527,82 @@ def get_task_prompt(issue, repo):
     )
 
 
+def _check_rate_limit():
+    """Check GitHub API rate limit and return info dict."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['gh', 'api', 'rate_limit', '--jq', '.rate'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            info = json.loads(result.stdout)
+            return {
+                'limit': info.get('limit', 0),
+                'remaining': info.get('remaining', 0),
+                'used': info.get('used', 0),
+                'reset': info.get('reset', 0),
+            }
+    except Exception as e:
+        log(f"GH monitor: rate limit check failed: {e}")
+    return None
+
+
+def _gh_monitor_log(msg, result=None):
+    """Write structured log entry for GH monitor activity."""
+    try:
+        entry = {
+            'timestamp': datetime.now().isoformat(),
+            'message': msg,
+        }
+        if result:
+            entry['result'] = result
+        with gh_monitor_lock:
+            if gh_monitor_state.get('rate_limit'):
+                entry['rate_limit_remaining'] = gh_monitor_state['rate_limit'].get('remaining')
+        with open('/tmp/gh-monitor.log', 'a') as f:
+            f.write(json.dumps(entry) + '\n')
+    except Exception:
+        pass
+
+
 def check_github_issues():
     """
-    Check GitHub for open issues with enkai: labels across all accessible repos.
+    Check GitHub for open issues with configured labels across all accessible repos.
     If Claude is idle, send one unprocessed issue as a prompt.
+    Includes rate limit checking and exponential backoff on errors.
     """
     import subprocess
 
-    log("GH monitor: searching issues across all repos...")
+    # Check if we're in a backoff period
+    with gh_monitor_lock:
+        if gh_monitor_state['backoff_until']:
+            if time.time() < gh_monitor_state['backoff_until']:
+                remaining = int(gh_monitor_state['backoff_until'] - time.time())
+                _gh_monitor_log(f"Backing off for {remaining}s more")
+                return {
+                    'timestamp': datetime.now().isoformat(),
+                    'sent': False,
+                    'skipped': True,
+                    'reason': f'Backing off ({remaining}s remaining)',
+                    'backoff': True,
+                }
+            else:
+                # Backoff expired
+                gh_monitor_state['backoff_until'] = None
 
-    # Search for each enkai label across all accessible repos
+    log(f"GH monitor: searching issues across all repos (labels: {GH_MONITOR_LABELS})...")
+
+    # Search for each label across all accessible repos
     all_issues = {}  # keyed by "owner/repo#number" to deduplicate
     errors = []
 
-    for label in ENKAI_LABELS:
+    for label in GH_MONITOR_LABELS:
         try:
             result = subprocess.run(
                 ['gh', 'search', 'issues', '--label', label,
-                 '--state', 'open', '--json', 'repository,number,title,body,labels',
-                 '--limit', '10'],
+                 '--state', 'open', '--json', 'repository,number,title,body,labels,updatedAt',
+                 '--limit', '100'],
                 capture_output=True, text=True, timeout=30
             )
 
@@ -508,20 +624,50 @@ def check_github_issues():
         except Exception as e:
             errors.append(f'{label}: {e}')
 
+    # Check rate limit after API calls
+    rate_info = _check_rate_limit()
+    if rate_info:
+        with gh_monitor_lock:
+            gh_monitor_state['rate_limit'] = rate_info
+        if rate_info['remaining'] < 100:
+            log(f"GH monitor: rate limit low ({rate_info['remaining']}/{rate_info['limit']})")
+            _gh_monitor_log(f"Rate limit low: {rate_info['remaining']}/{rate_info['limit']}")
+
     if errors and not all_issues:
+        # All labels failed — apply exponential backoff
+        with gh_monitor_lock:
+            gh_monitor_state['backoff_count'] += 1
+            backoff_secs = min(1800, 30 * (2 ** gh_monitor_state['backoff_count']))  # Max 30 min
+            gh_monitor_state['backoff_until'] = time.time() + backoff_secs
+        _gh_monitor_log(f"All labels failed, backing off {backoff_secs}s", {'errors': errors})
         return {
             'timestamp': datetime.now().isoformat(),
             'error': '; '.join(errors),
             'issues_found': 0,
             'sent': False,
+            'backoff_seconds': backoff_secs,
         }
+
+    # Success — reset backoff counter
+    with gh_monitor_lock:
+        gh_monitor_state['backoff_count'] = 0
 
     issues = list(all_issues.values())
 
-    # Filter out already-processed issues
+    # Filter out already-processed issues (check for updates too)
     with gh_monitor_lock:
         processed = gh_monitor_state['processed_issues']
-        new_issues = [i for i in issues if i['_key'] not in processed]
+        new_issues = []
+        for i in issues:
+            key = i['_key']
+            if key not in processed:
+                new_issues.append(i)
+            else:
+                # Check if issue was updated since we last processed it
+                issue_updated = i.get('updatedAt', '')
+                last_updated = processed[key].get('updated_at', '')
+                if issue_updated and last_updated and issue_updated > last_updated:
+                    new_issues.append(i)  # Re-process updated issue
 
     if not new_issues:
         return {
@@ -565,14 +711,7 @@ def check_github_issues():
     success = send_to_tmux(prompt, session='frank-claude', auto_submit=True)
 
     issue_key = issue['_key']
-    if success:
-        with gh_monitor_lock:
-            gh_monitor_state['processed_issues'].add(issue_key)
-        log(f"GH monitor: sent {issue_key} to Claude")
-    else:
-        log(f"GH monitor: failed to send {issue_key}")
-
-    return {
+    result = {
         'timestamp': datetime.now().isoformat(),
         'issues_found': len(issues),
         'new_issues': len(new_issues),
@@ -583,6 +722,21 @@ def check_github_issues():
         'issue_repo': repo,
         'claude_state': state,
     }
+
+    if success:
+        with gh_monitor_lock:
+            gh_monitor_state['processed_issues'][issue_key] = {
+                'processed_at': datetime.now().isoformat(),
+                'updated_at': issue.get('updatedAt', ''),
+            }
+        _save_gh_monitor_state()
+        log(f"GH monitor: sent {issue_key} to Claude")
+        _gh_monitor_log(f"Sent {issue_key}", result)
+    else:
+        log(f"GH monitor: failed to send {issue_key}")
+        _gh_monitor_log(f"Failed to send {issue_key}", result)
+
+    return result
 
 
 def gh_monitor_timer_loop(stop_event, interval_seconds):
@@ -666,8 +820,14 @@ def get_gh_monitor_status():
             'last_check': gh_monitor_state['last_check'],
             'last_result': gh_monitor_state['last_result'],
             'processed_count': len(gh_monitor_state['processed_issues']),
-            'labels': ENKAI_LABELS,
+            'labels': GH_MONITOR_LABELS,
+            'rate_limit': gh_monitor_state.get('rate_limit'),
         }
+
+        if gh_monitor_state.get('backoff_until') and time.time() < gh_monitor_state['backoff_until']:
+            status['backoff_seconds'] = int(gh_monitor_state['backoff_until'] - time.time())
+        else:
+            status['backoff_seconds'] = None
 
         if gh_monitor_state['next_check']:
             remaining = gh_monitor_state['next_check'] - datetime.now().timestamp()
