@@ -463,62 +463,60 @@ def _get_gh_monitor_labels():
 
 GH_MONITOR_LABELS = _get_gh_monitor_labels()
 
-# Task type keywords (extracted from label suffix after the colon)
-TASK_PROMPTS = {
-    'research': (
-        "This is a **research** task. Please:\n"
-        "- Deep-dive into the topic described in this issue\n"
-        "- Investigate relevant documentation, code, and prior art\n"
-        "- Produce findings with key insights and actionable recommendations\n"
-        "- Post your findings as a comment on the issue"
-    ),
-    'design': (
-        "This is a **design** task. Please:\n"
-        "- Analyze the requirements described in this issue\n"
-        "- Propose an architecture or design approach\n"
-        "- Identify tradeoffs between alternatives\n"
-        "- Document your design with diagrams or structured notes as an issue comment"
-    ),
-    'plan': (
-        "This is a **planning** task. Please:\n"
-        "- Create a detailed implementation plan for this issue\n"
-        "- Break it down into concrete steps with files to modify\n"
-        "- Define acceptance criteria for each step\n"
-        "- Post the plan as a comment on the issue"
-    ),
-    'build': (
-        "This is a **build** task. Please:\n"
-        "- Implement the changes described in this issue\n"
-        "- Write code, run tests, and verify correctness\n"
-        "- Create a pull request with your changes\n"
-        "- Link the PR to the issue"
-    ),
+# Label suffix -> skill command routing
+# "build" is special: triggers /scrum which processes ALL build issues at once
+LABEL_SKILL_MAP = {
+    'build': '/scrum',
+    'design': '/design',
+    'plan': '/plan',
+    'research': '/dd',
 }
 
 
-def get_task_prompt(issue, repo):
-    """Build a label-aware prompt for a monitored issue."""
+def _get_issue_task_type(issue):
+    """Extract the task type from an issue's label suffix (e.g., 'enkai:build' -> 'build')."""
     labels = [l.get('name', '') for l in issue.get('labels', [])]
-    body = issue.get('body', '') or '(no description)'
-
-    # Sanitize body: truncate to 4000 chars, strip HTML tags
-    body = re.sub(r'<[^>]+>', '', body)  # Strip HTML
-    if len(body) > 4000:
-        body = body[:4000] + '\n\n... (truncated)'
-
-    # Find matching task type from label suffix (e.g., "enkai:build" -> "build")
-    task_instructions = 'Please work on this GitHub issue.'
     for label in labels:
         if ':' in label:
             task_type = label.split(':', 1)[1]
-            if task_type in TASK_PROMPTS:
-                task_instructions = TASK_PROMPTS[task_type]
-                break
+            if task_type in LABEL_SKILL_MAP:
+                return task_type
+    return None
 
+
+def _sanitize_issue_body(body):
+    """Strip HTML and truncate issue body for safe prompt inclusion."""
+    body = body or '(no description)'
+    body = re.sub(r'<[^>]+>', '', body)  # Strip HTML
+    if len(body) > 4000:
+        body = body[:4000] + '\n\n... (truncated)'
+    return body
+
+
+def get_task_prompt(issue, repo):
+    """Build a skill-routed prompt for a monitored issue."""
+    task_type = _get_issue_task_type(issue)
+    skill = LABEL_SKILL_MAP.get(task_type, '')
+    labels = [l.get('name', '') for l in issue.get('labels', [])]
+    body = _sanitize_issue_body(issue.get('body', ''))
     all_labels = ', '.join(labels)
 
+    if task_type == 'build':
+        # /scrum handles all build issues itself — just invoke it
+        return '/scrum'
+
+    if skill:
+        # Single-issue skills get the issue context as the argument
+        return (
+            f"{skill} Issue #{issue['number']}: {issue['title']} (repo: {repo})\n\n"
+            f"Labels: {all_labels}\n\n"
+            f"{body}\n\n"
+            f"When done, close the issue with: gh issue close {issue['number']} --repo {repo}"
+        )
+
+    # Fallback for unknown label types
     return (
-        f"{task_instructions}\n\n"
+        f"Please work on this GitHub issue.\n\n"
         f"Issue #{issue['number']}: {issue['title']}\n"
         f"Labels: {all_labels}\n"
         f"Repository: {repo}\n\n"
@@ -703,8 +701,45 @@ def check_github_issues():
             'claude_state': state,
         }
 
-    # Process one issue per tick
-    issue = new_issues[0]
+    # Separate build issues from single-issue tasks
+    build_issues = [i for i in new_issues if _get_issue_task_type(i) == 'build']
+    single_issues = [i for i in new_issues if _get_issue_task_type(i) != 'build']
+
+    # Build issues: send /scrum once, which processes all build issues in parallel
+    if build_issues:
+        prompt = '/scrum'
+        success = send_to_tmux(prompt, session='frank-claude', auto_submit=True)
+
+        build_keys = [i['_key'] for i in build_issues]
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'issues_found': len(issues),
+            'new_issues': len(new_issues),
+            'sent': success,
+            'mode': 'scrum',
+            'build_issues': len(build_issues),
+            'issue_keys': build_keys,
+            'claude_state': state,
+        }
+
+        if success:
+            with gh_monitor_lock:
+                for i in build_issues:
+                    gh_monitor_state['processed_issues'][i['_key']] = {
+                        'processed_at': datetime.now().isoformat(),
+                        'updated_at': i.get('updatedAt', ''),
+                    }
+            _save_gh_monitor_state()
+            log(f"GH monitor: sent /scrum for {len(build_issues)} build issues")
+            _gh_monitor_log(f"Sent /scrum for {len(build_issues)} build issues", result)
+        else:
+            log(f"GH monitor: failed to send /scrum")
+            _gh_monitor_log(f"Failed to send /scrum", result)
+
+        return result
+
+    # Single-issue tasks: process one per tick
+    issue = single_issues[0]
     repo = issue['_repo']
     prompt = get_task_prompt(issue, repo)
 
@@ -716,6 +751,8 @@ def check_github_issues():
         'issues_found': len(issues),
         'new_issues': len(new_issues),
         'sent': success,
+        'mode': 'skill',
+        'skill': LABEL_SKILL_MAP.get(_get_issue_task_type(issue), 'unknown'),
         'issue_key': issue_key,
         'issue_number': issue['number'],
         'issue_title': issue['title'],
@@ -730,7 +767,7 @@ def check_github_issues():
                 'updated_at': issue.get('updatedAt', ''),
             }
         _save_gh_monitor_state()
-        log(f"GH monitor: sent {issue_key} to Claude")
+        log(f"GH monitor: sent {LABEL_SKILL_MAP.get(_get_issue_task_type(issue), '')} for {issue_key}")
         _gh_monitor_log(f"Sent {issue_key}", result)
     else:
         log(f"GH monitor: failed to send {issue_key}")
