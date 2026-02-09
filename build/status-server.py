@@ -456,9 +456,8 @@ def _get_gh_monitor_labels():
     env_labels = os.environ.get('GH_MONITOR_LABELS', '').strip()
     if env_labels:
         return [l.strip() for l in env_labels.split(',') if l.strip()]
-    # Derive from container name
-    prefix = os.environ.get('CONTAINER_NAME', 'frank').split('-')[0]  # e.g. "enkai-1" -> "enkai"
-    return [f'{prefix}:research', f'{prefix}:design', f'{prefix}:plan', f'{prefix}:build']
+    # Default: all containers use enkai: prefix
+    return ['enkai:research', 'enkai:design', 'enkai:plan', 'enkai:build']
 
 
 GH_MONITOR_LABELS = _get_gh_monitor_labels()
