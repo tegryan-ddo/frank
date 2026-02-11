@@ -506,7 +506,10 @@ async function ensureTargetGroupWithPort(
   suffix: string,
   port: number
 ): Promise<string> {
-  const tgName = `frank-profile-${profileName}${suffix}`.substring(0, 32);
+  // Truncate profile name (not suffix) to stay within 32-char TG name limit
+  const prefix = 'frank-profile-';
+  const maxProfileLen = 32 - prefix.length - suffix.length;
+  const tgName = `${prefix}${profileName.substring(0, maxProfileLen)}${suffix}`;
 
   // Check if exists
   try {
