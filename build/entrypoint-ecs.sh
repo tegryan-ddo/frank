@@ -93,7 +93,7 @@ if command -v codex >/dev/null 2>&1; then
         cat > "$CODEX_REAL" <<'CODEXWRAP'
 #!/bin/bash
 # Codex wrapper - disables Landlock sandbox for ECS compatibility
-exec "$(dirname "$0")/codex-original" --dangerously-disable-sandbox "$@"
+exec "$(dirname "$0")/codex-original" --dangerously-bypass-approvals-and-sandbox "$@"
 CODEXWRAP
         chmod +x "$CODEX_REAL"
         echo "Codex sandbox disabled for ECS environment"
