@@ -152,11 +152,7 @@ func (m *Manager) EnsureTargetGroup(ctx context.Context, profileName string) (st
 		return "", err
 	}
 
-	tgName := TargetGroupPrefix + profileName
-	if len(tgName) > 32 {
-		// Target group names are limited to 32 chars
-		tgName = tgName[:32]
-	}
+	tgName := targetGroupName(profileName, "")
 
 	// Check if target group already exists
 	existing, err := m.elbClient.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{
@@ -332,10 +328,7 @@ func (m *Manager) DeregisterTarget(ctx context.Context, targetGroupArn, ip strin
 
 // GetTargetGroupArn finds the target group ARN for a profile
 func (m *Manager) GetTargetGroupArn(ctx context.Context, profileName string) (string, error) {
-	tgName := TargetGroupPrefix + profileName
-	if len(tgName) > 32 {
-		tgName = tgName[:32]
-	}
+	tgName := targetGroupName(profileName, "")
 
 	existing, err := m.elbClient.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{
 		Names: []string{tgName},
@@ -457,10 +450,7 @@ func (m *Manager) FindOrphanedTargetGroups(ctx context.Context, runningProfiles 
 // DeleteAllTargetGroups removes all target groups (main, -t, -b) for a profile
 func (m *Manager) DeleteAllTargetGroups(ctx context.Context, profileName string) error {
 	for _, suffix := range targetGroupSuffixes {
-		tgName := TargetGroupPrefix + profileName + suffix
-		if len(tgName) > 32 {
-			tgName = tgName[:32]
-		}
+		tgName := targetGroupName(profileName, suffix)
 
 		existing, err := m.elbClient.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{
 			Names: []string{tgName},
@@ -536,6 +526,19 @@ func (m *Manager) DeleteAllListenerRules(ctx context.Context, profileName string
 	}
 
 	return nil
+}
+
+// targetGroupName builds a target group name that fits the 32-char AWS limit.
+// It truncates the profile name portion while preserving the prefix and suffix.
+func targetGroupName(profileName, suffix string) string {
+	maxProfileLen := 32 - len(TargetGroupPrefix) - len(suffix)
+	if maxProfileLen < 0 {
+		maxProfileLen = 0
+	}
+	if len(profileName) > maxProfileLen {
+		profileName = profileName[:maxProfileLen]
+	}
+	return TargetGroupPrefix + profileName + suffix
 }
 
 // hashToPriority converts a profile name to a listener rule priority (100-999)
