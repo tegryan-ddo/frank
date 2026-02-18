@@ -104,15 +104,26 @@ fi
 # Priority: 1) GitHub App (auto-refreshing), 2) Personal Access Token
 GITHUB_AUTH_OK=false
 
+# Clear any stale credentials that might interfere
+unset GH_TOKEN 2>/dev/null || true
+
 # Try GitHub App authentication first (preferred - tokens auto-refresh)
 if [ -n "$GITHUB_APP_ID" ] && [ -n "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_APP_INSTALLATION_ID" ]; then
     echo "Configuring GitHub App authentication..."
     if GH_APP_TOKEN=$(/usr/local/bin/github-app-token.sh 2>/tmp/github-app-error.log); then
+        # Clear old GITHUB_TOKEN to avoid credential conflicts
+        unset GITHUB_TOKEN 2>/dev/null || true
         export GH_TOKEN="$GH_APP_TOKEN"
-        echo "$GH_APP_TOKEN" | gh auth login --with-token 2>/dev/null || true
-        gh auth setup-git 2>/dev/null || true
-        echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
-        GITHUB_AUTH_OK=true
+
+        # Authenticate with gh CLI
+        echo "$GH_APP_TOKEN" | gh auth login --with-token 2>/dev/null
+        if [ $? -eq 0 ]; then
+            gh auth setup-git 2>/dev/null || true
+            echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
+            GITHUB_AUTH_OK=true
+        else
+            echo "WARNING: gh auth login failed with GitHub App token"
+        fi
     else
         echo "WARNING: GitHub App token generation failed"
         cat /tmp/github-app-error.log 2>/dev/null || true
@@ -128,12 +139,6 @@ if [ "$GITHUB_AUTH_OK" = false ]; then
         echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
         gh auth setup-git 2>/dev/null || true
         echo "GitHub token configured"
-        GITHUB_AUTH_OK=true
-    elif [ -n "$GH_TOKEN" ]; then
-        # Token passed directly as GH_TOKEN env var
-        echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
-        gh auth setup-git 2>/dev/null || true
-        echo "GitHub token configured (from GH_TOKEN)"
         GITHUB_AUTH_OK=true
     fi
 fi
