@@ -115,16 +115,16 @@ if [ -n "$GITHUB_APP_ID" ] && [ -n "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_
         unset GITHUB_TOKEN 2>/dev/null || true
         unset GH_TOKEN 2>/dev/null || true
 
-        # Clear ALL git credential helpers and use only store
+        # Disable ALL credential helpers (system and global)
+        git config --system --unset-all credential.helper 2>/dev/null || true
         git config --global --unset-all credential.helper 2>/dev/null || true
-        git config --global credential.helper store
+        git config --global credential.helper ""
 
-        # Write credentials in proper format
-        mkdir -p ~/.config/git
-        echo "https://x-access-token:${GH_APP_TOKEN}@github.com" > ~/.git-credentials
-        chmod 600 ~/.git-credentials
+        # Use URL rewriting to embed credentials (most reliable method)
+        # This rewrites https://github.com/ URLs to include auth
+        git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-        # Set GH_TOKEN for gh CLI operations (after git config)
+        # Set GH_TOKEN for gh CLI operations
         export GH_TOKEN="$GH_APP_TOKEN"
 
         echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
@@ -141,13 +141,13 @@ if [ "$GITHUB_AUTH_OK" = false ]; then
     if [ -n "$GITHUB_TOKEN" ]; then
         echo "Configuring GitHub token..."
 
-        # Clear ALL git credential helpers and use only store
+        # Disable ALL credential helpers
+        git config --system --unset-all credential.helper 2>/dev/null || true
         git config --global --unset-all credential.helper 2>/dev/null || true
-        git config --global credential.helper store
+        git config --global credential.helper ""
 
-        # Write credentials in proper format
-        echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
-        chmod 600 ~/.git-credentials
+        # Use URL rewriting to embed credentials
+        git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
 
         # Set GH_TOKEN for gh CLI operations
         export GH_TOKEN="$GITHUB_TOKEN"
