@@ -75,6 +75,22 @@ export class FrankStack extends cdk.Stack {
       description: 'OpenAI API key for Codex CLI',
     });
 
+    // GitHub App credentials (preferred over PAT - auto-refreshing tokens)
+    const githubAppIdSecret = new secretsmanager.Secret(this, 'GitHubAppId', {
+      secretName: '/frank/github-app-id',
+      description: 'GitHub App ID for auto-refreshing authentication',
+    });
+
+    const githubAppPrivateKeySecret = new secretsmanager.Secret(this, 'GitHubAppPrivateKey', {
+      secretName: '/frank/github-app-private-key',
+      description: 'GitHub App private key (PEM format)',
+    });
+
+    const githubAppInstallationIdSecret = new secretsmanager.Secret(this, 'GitHubAppInstallationId', {
+      secretName: '/frank/github-app-installation-id',
+      description: 'GitHub App installation ID for the org/repos',
+    });
+
     // =========================================================================
     // Analytics S3 Bucket
     // =========================================================================
@@ -179,6 +195,11 @@ export class FrankStack extends cdk.Stack {
         GIT_BRANCH: 'main',
       },
       secrets: {
+        // GitHub App auth (preferred - auto-refreshing tokens)
+        GITHUB_APP_ID: ecs.Secret.fromSecretsManager(githubAppIdSecret),
+        GITHUB_APP_PRIVATE_KEY: ecs.Secret.fromSecretsManager(githubAppPrivateKeySecret),
+        GITHUB_APP_INSTALLATION_ID: ecs.Secret.fromSecretsManager(githubAppInstallationIdSecret),
+        // Legacy PAT auth (fallback)
         GITHUB_TOKEN: ecs.Secret.fromSecretsManager(githubTokenSecret),
         CLAUDE_CREDENTIALS: ecs.Secret.fromSecretsManager(claudeCredentialsSecret),
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openaiApiKeySecret),
@@ -674,7 +695,22 @@ export class FrankStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'GitHubTokenSecretArn', {
       value: githubTokenSecret.secretArn,
-      description: 'GitHub token secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/github-token --secret-string "$(gh auth token)"',
+      description: 'GitHub token secret ARN (legacy) - update with: aws secretsmanager put-secret-value --secret-id /frank/github-token --secret-string "$(gh auth token)"',
+    });
+
+    new cdk.CfnOutput(this, 'GitHubAppIdSecretArn', {
+      value: githubAppIdSecret.secretArn,
+      description: 'GitHub App ID secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/github-app-id --secret-string "YOUR_APP_ID"',
+    });
+
+    new cdk.CfnOutput(this, 'GitHubAppPrivateKeySecretArn', {
+      value: githubAppPrivateKeySecret.secretArn,
+      description: 'GitHub App private key secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/github-app-private-key --secret-string "$(cat your-app.pem)"',
+    });
+
+    new cdk.CfnOutput(this, 'GitHubAppInstallationIdSecretArn', {
+      value: githubAppInstallationIdSecret.secretArn,
+      description: 'GitHub App installation ID secret ARN - update with: aws secretsmanager put-secret-value --secret-id /frank/github-app-installation-id --secret-string "YOUR_INSTALLATION_ID"',
     });
 
     new cdk.CfnOutput(this, 'ClaudeCredentialsSecretArn', {
