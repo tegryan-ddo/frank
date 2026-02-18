@@ -115,15 +115,17 @@ if [ -n "$GITHUB_APP_ID" ] && [ -n "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_
         unset GITHUB_TOKEN 2>/dev/null || true
         export GH_TOKEN="$GH_APP_TOKEN"
 
-        # Authenticate with gh CLI
-        echo "$GH_APP_TOKEN" | gh auth login --with-token 2>/dev/null
-        if [ $? -eq 0 ]; then
-            gh auth setup-git 2>/dev/null || true
-            echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
-            GITHUB_AUTH_OK=true
-        else
-            echo "WARNING: gh auth login failed with GitHub App token"
-        fi
+        # Configure git credentials directly (more reliable than gh auth setup-git)
+        # This uses the store helper to cache credentials
+        git config --global credential.helper store
+        echo "https://x-access-token:${GH_APP_TOKEN}@github.com" > ~/.git-credentials
+        chmod 600 ~/.git-credentials
+
+        # Also set up gh CLI for other operations
+        echo "$GH_APP_TOKEN" | gh auth login --with-token 2>/dev/null || true
+
+        echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
+        GITHUB_AUTH_OK=true
     else
         echo "WARNING: GitHub App token generation failed"
         cat /tmp/github-app-error.log 2>/dev/null || true
@@ -136,8 +138,15 @@ if [ "$GITHUB_AUTH_OK" = false ]; then
     if [ -n "$GITHUB_TOKEN" ]; then
         echo "Configuring GitHub token..."
         export GH_TOKEN="$GITHUB_TOKEN"
+
+        # Configure git credentials directly
+        git config --global credential.helper store
+        echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
+        chmod 600 ~/.git-credentials
+
+        # Also set up gh CLI
         echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
-        gh auth setup-git 2>/dev/null || true
+
         echo "GitHub token configured"
         GITHUB_AUTH_OK=true
     fi
