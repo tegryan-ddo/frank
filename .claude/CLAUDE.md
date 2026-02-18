@@ -80,6 +80,66 @@ aws secretsmanager put-secret-value --secret-id /frank/github-token --secret-str
 aws secretsmanager put-secret-value --secret-id /frank/claude-credentials --secret-string (Get-Content ~/.claude/.credentials.json -Raw)
 ```
 
+## GitHub Authentication
+
+Frank supports two authentication methods for GitHub access:
+
+### GitHub App (Recommended)
+
+GitHub Apps provide auto-refreshing tokens that never expire. This is the recommended approach.
+
+**1. Create a GitHub App:**
+- Go to your org settings → Developer settings → GitHub Apps → New GitHub App
+- Name: `frank-ecs` (or similar)
+- Homepage URL: `https://frank.digitaldevops.io`
+- Uncheck "Webhook Active"
+- Permissions:
+  - Repository: Contents (Read & Write), Metadata (Read-only)
+  - Organization: Members (Read-only) - if needed
+- Where can this app be installed? "Only on this account"
+- Create the app
+
+**2. Generate a private key:**
+- On the app settings page, scroll to "Private keys"
+- Click "Generate a private key"
+- Save the downloaded `.pem` file
+
+**3. Install the app:**
+- Go to "Install App" in the sidebar
+- Install on your organization
+- Select "All repositories" or specific repos
+- Note the Installation ID from the URL: `https://github.com/settings/installations/INSTALLATION_ID`
+
+**4. Store credentials in Secrets Manager:**
+```bash
+# App ID (from app settings page)
+aws secretsmanager put-secret-value \
+  --secret-id /frank/github-app-id \
+  --secret-string "123456"
+
+# Private key (PEM file contents)
+aws secretsmanager put-secret-value \
+  --secret-id /frank/github-app-private-key \
+  --secret-string "$(cat your-app-private-key.pem)"
+
+# Installation ID (from installation URL)
+aws secretsmanager put-secret-value \
+  --secret-id /frank/github-app-installation-id \
+  --secret-string "12345678"
+```
+
+### Personal Access Token (Legacy)
+
+Falls back to PAT if GitHub App credentials aren't configured.
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id /frank/github-token \
+  --secret-string "$(gh auth token)"
+```
+
+Note: PATs expire and require manual rotation.
+
 ## ECS Management
 
 ```bash

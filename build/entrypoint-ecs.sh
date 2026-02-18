@@ -100,20 +100,47 @@ CODEXWRAP
     fi
 fi
 
-# Setup GitHub token (injected by Copilot secrets)
-if [ -n "$GITHUB_TOKEN" ]; then
-    echo "Configuring GitHub token..."
-    export GH_TOKEN="$GITHUB_TOKEN"
-    echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
-    gh auth setup-git 2>/dev/null || true
-    echo "GitHub token configured"
-elif [ -n "$GH_TOKEN" ]; then
-    # Token passed directly as GH_TOKEN env var
-    echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
-    gh auth setup-git 2>/dev/null || true
-    echo "GitHub token configured (from GH_TOKEN)"
-else
-    echo "WARNING: No GitHub token configured"
+# Setup GitHub authentication
+# Priority: 1) GitHub App (auto-refreshing), 2) Personal Access Token
+GITHUB_AUTH_OK=false
+
+# Try GitHub App authentication first (preferred - tokens auto-refresh)
+if [ -n "$GITHUB_APP_ID" ] && [ -n "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_APP_INSTALLATION_ID" ]; then
+    echo "Configuring GitHub App authentication..."
+    if GH_APP_TOKEN=$(/usr/local/bin/github-app-token.sh 2>/tmp/github-app-error.log); then
+        export GH_TOKEN="$GH_APP_TOKEN"
+        echo "$GH_APP_TOKEN" | gh auth login --with-token 2>/dev/null || true
+        gh auth setup-git 2>/dev/null || true
+        echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
+        GITHUB_AUTH_OK=true
+    else
+        echo "WARNING: GitHub App token generation failed"
+        cat /tmp/github-app-error.log 2>/dev/null || true
+        echo "Falling back to token authentication..."
+    fi
+fi
+
+# Fall back to personal access token
+if [ "$GITHUB_AUTH_OK" = false ]; then
+    if [ -n "$GITHUB_TOKEN" ]; then
+        echo "Configuring GitHub token..."
+        export GH_TOKEN="$GITHUB_TOKEN"
+        echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
+        gh auth setup-git 2>/dev/null || true
+        echo "GitHub token configured"
+        GITHUB_AUTH_OK=true
+    elif [ -n "$GH_TOKEN" ]; then
+        # Token passed directly as GH_TOKEN env var
+        echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
+        gh auth setup-git 2>/dev/null || true
+        echo "GitHub token configured (from GH_TOKEN)"
+        GITHUB_AUTH_OK=true
+    fi
+fi
+
+if [ "$GITHUB_AUTH_OK" = false ]; then
+    echo "WARNING: No GitHub authentication configured"
+    echo "  Set GITHUB_APP_* vars for app auth, or GITHUB_TOKEN for PAT auth"
 fi
 
 # Start Pnyx credential sync daemon (handles per-agent API keys)

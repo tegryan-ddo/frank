@@ -171,6 +171,10 @@ RUN chmod +x /usr/local/bin/codex-credential-sync.sh
 COPY build/pnyx-credential-sync.sh /usr/local/bin/pnyx-credential-sync.sh
 RUN chmod +x /usr/local/bin/pnyx-credential-sync.sh
 
+# Copy GitHub App token generator (auto-refreshing auth)
+COPY build/github-app-token.sh /usr/local/bin/github-app-token.sh
+RUN chmod +x /usr/local/bin/github-app-token.sh
+
 # Copy analytics sync script (uploads local analytics to S3)
 COPY build/analytics-sync.sh /usr/local/bin/analytics-sync.sh
 RUN chmod +x /usr/local/bin/analytics-sync.sh
