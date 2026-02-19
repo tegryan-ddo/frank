@@ -115,10 +115,17 @@ if [ -n "$GITHUB_APP_ID" ] && [ -n "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_
         unset GITHUB_TOKEN 2>/dev/null || true
         unset GH_TOKEN 2>/dev/null || true
 
+        # Remove ALL legacy credential files from EFS (leftover from previous deployments)
+        # These files persist on shared storage and can interfere with URL rewriting
+        rm -f ~/.git-credentials 2>/dev/null || true
+        rm -f ~/.config/git/credentials 2>/dev/null || true
+        rm -rf ~/.cache/git/credential 2>/dev/null || true
+
         # Disable ALL credential helpers (system and global)
+        # Use "!" to completely disable the credential system, not just clear it
         git config --system --unset-all credential.helper 2>/dev/null || true
         git config --global --unset-all credential.helper 2>/dev/null || true
-        git config --global credential.helper ""
+        git config --global credential.helper "!"
 
         # Use URL rewriting to embed credentials (most reliable method)
         # This rewrites https://github.com/ URLs to include auth
@@ -141,10 +148,15 @@ if [ "$GITHUB_AUTH_OK" = false ]; then
     if [ -n "$GITHUB_TOKEN" ]; then
         echo "Configuring GitHub token..."
 
-        # Disable ALL credential helpers
+        # Remove ALL legacy credential files from EFS
+        rm -f ~/.git-credentials 2>/dev/null || true
+        rm -f ~/.config/git/credentials 2>/dev/null || true
+        rm -rf ~/.cache/git/credential 2>/dev/null || true
+
+        # Disable ALL credential helpers with "!" to completely disable
         git config --system --unset-all credential.helper 2>/dev/null || true
         git config --global --unset-all credential.helper 2>/dev/null || true
-        git config --global credential.helper ""
+        git config --global credential.helper "!"
 
         # Use URL rewriting to embed credentials
         git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"

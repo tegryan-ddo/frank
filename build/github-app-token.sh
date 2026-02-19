@@ -42,8 +42,8 @@ trap "rm -f $KEY_FILE" EXIT
 # Handle both actual newlines and escaped \n in the key
 echo "$GITHUB_APP_PRIVATE_KEY" | sed 's/\\n/\n/g' > "$KEY_FILE"
 
-# Verify the key is valid
-if ! openssl rsa -in "$KEY_FILE" -check -noout 2>/dev/null; then
+# Verify the key is valid (suppress all output, only care about exit code)
+if ! openssl rsa -in "$KEY_FILE" -check -noout >/dev/null 2>&1; then
     echo "ERROR: Invalid private key" >&2
     exit 2
 fi
