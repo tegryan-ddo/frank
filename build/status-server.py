@@ -523,9 +523,9 @@ def get_gh_repo():
     return None
 
 
-# Configurable labels: read from GH_MONITOR_LABELS env var, or derive from container name.
+# Configurable labels: read from GH_MONITOR_LABELS env var.
 # Format: comma-separated label names, e.g. "enkai:research,enkai:design,enkai:plan,enkai:build"
-# If not set, defaults to {CONTAINER_NAME}:research, {CONTAINER_NAME}:design, etc.
+# All containers use enkai:* labels by default (centralized issue tracking).
 def _get_gh_monitor_labels():
     env_labels = os.environ.get('GH_MONITOR_LABELS', '').strip()
     if env_labels:
