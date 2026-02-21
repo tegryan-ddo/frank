@@ -242,6 +242,7 @@ git config --global --add safe.directory '*'
 PLUGINS_REPO="https://github.com/anthropics/claude-plugins-official.git"
 PLUGINS_CACHE="/opt/claude-plugins-official"
 PLUGINS_DIR="$HOME/.claude/plugins"
+PLUGINS_GIT_SHA="unknown"
 
 # List of plugins to install (internal plugins from plugins/ directory)
 INTERNAL_PLUGINS=(
@@ -291,6 +292,12 @@ install_plugins() {
     local project_path="$1"
     echo "=== Installing Claude Code Plugins ==="
     echo "Project path: $project_path"
+
+    # Skip if plugins repo wasn't cloned successfully
+    if [ ! -d "$PLUGINS_CACHE/.git" ]; then
+        echo "Plugins cache not available, skipping plugin installation"
+        return 0
+    fi
 
     local cache_base="$PLUGINS_DIR/cache/claude-plugins-official"
     local now
