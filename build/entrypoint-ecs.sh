@@ -525,7 +525,8 @@ setup_worktree_from_clone() {
             rm -rf "$REPO_BASE"
         fi
         echo "Cloning repository to $REPO_BASE..."
-        git clone "$repo_url" "$REPO_BASE"
+        # Disable hooks during clone - repo hooks may depend on tools not in container
+        git clone -c core.hooksPath=/dev/null "$repo_url" "$REPO_BASE"
     else
         # Check if existing repo matches the requested URL
         local existing_url
@@ -535,13 +536,17 @@ setup_worktree_from_clone() {
             echo "Removing old repo and worktrees..."
             rm -rf "$REPO_BASE" /workspace/worktrees/*
             echo "Cloning new repository to $REPO_BASE..."
-            git clone "$repo_url" "$REPO_BASE"
+            # Disable hooks during clone - repo hooks may depend on tools not in container
+            git clone -c core.hooksPath=/dev/null "$repo_url" "$REPO_BASE"
         else
             echo "Repository base exists, fetching and pulling updates..."
             git -C "$REPO_BASE" fetch --all 2>/dev/null || true
             git -C "$REPO_BASE" pull --ff-only 2>/dev/null || true
         fi
     fi
+
+    # Disable repo hooks permanently - they may depend on tools not in the container
+    git -C "$REPO_BASE" config core.hooksPath /dev/null 2>/dev/null || true
 
     # Set worktree path - keep under profile directory to avoid cross-profile issues
     WORKTREE_PATH="/workspace/repos/$CONTAINER_NAME/work"
@@ -593,6 +598,9 @@ setup_worktree_from_local() {
 
     # Update REPO_BASE to point to the workspace
     REPO_BASE="/workspace"
+
+    # Disable repo hooks - they may depend on tools not in the container
+    git -C /workspace config core.hooksPath /dev/null 2>/dev/null || true
 
     # Check if worktree already exists
     if [ -d "$WORKTREE_PATH" ]; then
