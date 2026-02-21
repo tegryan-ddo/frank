@@ -356,7 +356,8 @@ install_plugins() {
 }
 
 # Clone plugins repo early (must complete before Claude starts)
-clone_plugins_repo
+# Non-fatal: container should still start even if plugins repo is unavailable
+clone_plugins_repo || echo "WARNING: Continuing without plugins"
 
 # Sync community skills from GitHub repos (e.g., tegryan-ddo/pedro)
 source /usr/local/bin/install-community-skills.sh
@@ -669,7 +670,8 @@ fi
 copy_community_skills_to_workdir "$WORK_DIR"
 
 # Install and register plugins now that we know the working directory
-install_plugins "$WORK_DIR"
+# Non-fatal: container should still start even if plugin installation fails
+install_plugins "$WORK_DIR" || echo "WARNING: Plugin installation failed, continuing without plugins"
 
 # Common ttyd theme
 TTYD_THEME='{"background":"#1e1e1e","foreground":"#d4d4d4","cursor":"#d4d4d4","selectionBackground":"#264f78","black":"#1e1e1e","red":"#f44747","green":"#6a9955","yellow":"#dcdcaa","blue":"#569cd6","magenta":"#c586c0","cyan":"#4ec9b0","white":"#d4d4d4","brightBlack":"#808080","brightRed":"#f44747","brightGreen":"#6a9955","brightYellow":"#dcdcaa","brightBlue":"#569cd6","brightMagenta":"#c586c0","brightCyan":"#4ec9b0","brightWhite":"#ffffff"}'
