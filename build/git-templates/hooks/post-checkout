@@ -8,6 +8,9 @@
 #   $2 = new HEAD
 #   $3 = 1 if branch checkout, 0 if file checkout
 
+# Fail gracefully if dependencies aren't available
+command -v git >/dev/null 2>&1 || exit 0
+
 # Only act on branch checkouts (not file checkouts)
 [ "$3" = "1" ] || exit 0
 
@@ -23,7 +26,7 @@ CURRENT_WORKTREE=$(git rev-parse --show-toplevel 2>/dev/null)
 
 # If main worktree has .claude/ and current worktree doesn't, copy it
 if [ -d "$MAIN_WORKTREE/.claude" ] && [ ! -d "$CURRENT_WORKTREE/.claude" ]; then
-    cp -r "$MAIN_WORKTREE/.claude" "$CURRENT_WORKTREE/.claude"
+    cp -r "$MAIN_WORKTREE/.claude" "$CURRENT_WORKTREE/.claude" 2>/dev/null || true
 fi
 
 exit 0
