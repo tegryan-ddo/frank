@@ -8,3 +8,6 @@ entrypoint* text eol=lf
 *.jpg binary
 *.gif binary
 *.ico binary
+
+# Git hooks must have Unix line endings
+build/git-templates/hooks/* text eol=lf
