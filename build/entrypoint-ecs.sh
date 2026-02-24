@@ -844,7 +844,7 @@ ttyd -p "${BASH_PORT}" -W \
     -t fontSize=16 \
     -t fontFamily="Consolas, 'Courier New', monospace" \
     -t theme="${TTYD_THEME}" \
-    --ping-interval 60 \
+    --ping-interval 5 \
     --base-path "$BASH_BASE_PATH" \
     tmux-session.sh frank-bash bash &
 BASH_PID=$!
@@ -879,6 +879,6 @@ exec ttyd -p "${TTYD_PORT}" -W \
     -t fontSize=16 \
     -t fontFamily="Consolas, 'Courier New', monospace" \
     -t theme="${TTYD_THEME}" \
-    --ping-interval 60 \
+    --ping-interval 5 \
     --base-path "$CLAUDE_BASE_PATH" \
     tmux-session.sh frank-claude claude
