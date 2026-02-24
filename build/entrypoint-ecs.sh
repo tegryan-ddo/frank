@@ -102,6 +102,8 @@ fi
 
 # Setup GitHub authentication
 # Priority: 1) GitHub App (auto-refreshing), 2) Personal Access Token
+# Supports multi-org: GITHUB_APP_INSTALLATION_ID can be a plain number (single org)
+# or a JSON object mapping org names to installation IDs (multi-org).
 GITHUB_AUTH_OK=false
 
 # Save PAT before App token setup may unset it - used as fallback for repos the App can't access
@@ -110,39 +112,101 @@ GITHUB_PAT="${GITHUB_TOKEN:-}"
 # Clear any stale credentials that might interfere
 unset GH_TOKEN 2>/dev/null || true
 
+# Helper: clean up legacy git credentials and disable credential helpers
+clean_git_credentials() {
+    rm -f ~/.git-credentials 2>/dev/null || true
+    rm -f ~/.config/git/credentials 2>/dev/null || true
+    rm -rf ~/.cache/git/credential 2>/dev/null || true
+    git config --system --unset-all credential.helper 2>/dev/null || true
+    git config --global --unset-all credential.helper 2>/dev/null || true
+    git config --global credential.helper "!"
+}
+
+# Helper: extract org name from a GitHub URL (e.g. https://github.com/enkai-inc/vp.git -> enkai-inc)
+parse_org_from_url() {
+    echo "$1" | sed -n 's|.*github\.com[:/]\([^/]*\)/.*|\1|p'
+}
+
 # Try GitHub App authentication first (preferred - tokens auto-refresh)
 if [ -n "$GITHUB_APP_ID" ] && [ -n "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_APP_INSTALLATION_ID" ]; then
     echo "Configuring GitHub App authentication..."
-    if GH_APP_TOKEN=$(/usr/local/bin/github-app-token.sh 2>/tmp/github-app-error.log); then
-        # Clear old tokens to avoid credential conflicts
-        unset GITHUB_TOKEN 2>/dev/null || true
-        unset GH_TOKEN 2>/dev/null || true
 
-        # Remove ALL legacy credential files from EFS (leftover from previous deployments)
-        # These files persist on shared storage and can interfere with URL rewriting
-        rm -f ~/.git-credentials 2>/dev/null || true
-        rm -f ~/.config/git/credentials 2>/dev/null || true
-        rm -rf ~/.cache/git/credential 2>/dev/null || true
+    # Detect format: JSON (multi-org) vs plain number (single org)
+    if echo "$GITHUB_APP_INSTALLATION_ID" | grep -q '^{'; then
+        # ---- Multi-org mode ----
+        echo "Multi-org installation IDs detected"
 
-        # Disable ALL credential helpers (system and global)
-        # Use "!" to completely disable the credential system, not just clear it
-        git config --system --unset-all credential.helper 2>/dev/null || true
-        git config --global --unset-all credential.helper 2>/dev/null || true
-        git config --global credential.helper "!"
+        # Generate JWT once (reused across all installation token exchanges)
+        if JWT=$(/usr/local/bin/github-app-jwt.sh 2>/tmp/github-app-error.log); then
+            clean_git_credentials
+            unset GITHUB_TOKEN 2>/dev/null || true
+            unset GH_TOKEN 2>/dev/null || true
 
-        # Use URL rewriting to embed credentials (most reliable method)
-        # This rewrites https://github.com/ URLs to include auth
-        git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
+            # Determine primary org from GIT_REPO (used for generic fallback + GH_TOKEN)
+            PRIMARY_ORG=""
+            if [ -n "$GIT_REPO" ]; then
+                PRIMARY_ORG=$(parse_org_from_url "$GIT_REPO")
+            fi
+            PRIMARY_TOKEN=""
 
-        # Set GH_TOKEN for gh CLI operations
-        export GH_TOKEN="$GH_APP_TOKEN"
+            # Loop over each org -> installation_id pair
+            for ORG in $(echo "$GITHUB_APP_INSTALLATION_ID" | jq -r 'keys[]'); do
+                INST_ID=$(echo "$GITHUB_APP_INSTALLATION_ID" | jq -r --arg org "$ORG" '.[$org]')
+                echo "  Generating token for org: $ORG (installation: $INST_ID)"
 
-        echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
-        GITHUB_AUTH_OK=true
+                if ORG_TOKEN=$(/usr/local/bin/github-app-token.sh "$INST_ID" "$JWT" 2>/tmp/github-app-error-${ORG}.log); then
+                    # Per-org URL rewriting (longest prefix match ensures correct token per org)
+                    git config --global url."https://x-access-token:${ORG_TOKEN}@github.com/${ORG}/".insteadOf "https://github.com/${ORG}/"
+                    echo "    URL rewriting configured for github.com/${ORG}/"
+
+                    # Track primary org token
+                    if [ "$ORG" = "$PRIMARY_ORG" ]; then
+                        PRIMARY_TOKEN="$ORG_TOKEN"
+                    fi
+                    # Keep first token as fallback if primary org isn't in the map
+                    if [ -z "$PRIMARY_TOKEN" ]; then
+                        PRIMARY_TOKEN="$ORG_TOKEN"
+                    fi
+                else
+                    echo "    WARNING: Token generation failed for org $ORG"
+                    cat "/tmp/github-app-error-${ORG}.log" 2>/dev/null || true
+                fi
+            done
+
+            if [ -n "$PRIMARY_TOKEN" ]; then
+                # Set GH_TOKEN for gh CLI operations (uses primary org token)
+                export GH_TOKEN="$PRIMARY_TOKEN"
+                echo "GitHub App multi-org authentication configured (app_id: $GITHUB_APP_ID)"
+                GITHUB_AUTH_OK=true
+            else
+                echo "WARNING: No org tokens were generated successfully"
+                echo "Falling back to token authentication..."
+            fi
+        else
+            echo "WARNING: GitHub App JWT generation failed"
+            cat /tmp/github-app-error.log 2>/dev/null || true
+            echo "Falling back to token authentication..."
+        fi
     else
-        echo "WARNING: GitHub App token generation failed"
-        cat /tmp/github-app-error.log 2>/dev/null || true
-        echo "Falling back to token authentication..."
+        # ---- Single-org mode (backward compatible) ----
+        if GH_APP_TOKEN=$(/usr/local/bin/github-app-token.sh 2>/tmp/github-app-error.log); then
+            clean_git_credentials
+            unset GITHUB_TOKEN 2>/dev/null || true
+            unset GH_TOKEN 2>/dev/null || true
+
+            # Use URL rewriting to embed credentials (most reliable method)
+            git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+            # Set GH_TOKEN for gh CLI operations
+            export GH_TOKEN="$GH_APP_TOKEN"
+
+            echo "GitHub App authentication configured (app_id: $GITHUB_APP_ID)"
+            GITHUB_AUTH_OK=true
+        else
+            echo "WARNING: GitHub App token generation failed"
+            cat /tmp/github-app-error.log 2>/dev/null || true
+            echo "Falling back to token authentication..."
+        fi
     fi
 fi
 
@@ -150,16 +214,7 @@ fi
 if [ "$GITHUB_AUTH_OK" = false ]; then
     if [ -n "$GITHUB_TOKEN" ]; then
         echo "Configuring GitHub token..."
-
-        # Remove ALL legacy credential files from EFS
-        rm -f ~/.git-credentials 2>/dev/null || true
-        rm -f ~/.config/git/credentials 2>/dev/null || true
-        rm -rf ~/.cache/git/credential 2>/dev/null || true
-
-        # Disable ALL credential helpers with "!" to completely disable
-        git config --system --unset-all credential.helper 2>/dev/null || true
-        git config --global --unset-all credential.helper 2>/dev/null || true
-        git config --global credential.helper "!"
+        clean_git_credentials
 
         # Use URL rewriting to embed credentials
         git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"

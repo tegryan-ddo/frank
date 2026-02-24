@@ -140,6 +140,30 @@ aws secretsmanager put-secret-value \
 
 Note: PATs expire and require manual rotation.
 
+### Multi-Org Support
+
+A single GitHub App can be installed on multiple organizations. Store a JSON mapping of org names to installation IDs in the existing secret:
+
+```bash
+# Single org (original format, still supported):
+aws secretsmanager put-secret-value \
+  --secret-id /frank/github-app-installation-id \
+  --secret-string "101518945"
+
+# Multi-org (JSON format):
+aws secretsmanager put-secret-value \
+  --secret-id /frank/github-app-installation-id \
+  --secret-string '{"tegryan-ddo":"101518945","enkai-inc":"NEW_ID"}'
+```
+
+When the secret value starts with `{`, the entrypoint generates a separate token per org and configures per-org git URL rewriting so each `github.com/<org>/` URL uses the correct token. The primary org (determined from `GIT_REPO`) is used for `GH_TOKEN` and as the fallback.
+
+Adding a new org requires:
+1. Install the GitHub App on the new org via GitHub UI
+2. Note the installation ID
+3. Update the secret JSON with the new org entry
+4. Restart containers (no code or image changes needed)
+
 ## ECS Management
 
 ```bash
