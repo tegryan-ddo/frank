@@ -82,43 +82,9 @@ export class FrankStack extends cdk.Stack {
     });
 
     // =========================================================================
-    // Analytics S3 Bucket
+    // Analytics S3 Bucket (import existing bucket retained from previous stack)
     // =========================================================================
-    const analyticsBucket = new s3.Bucket(this, 'AnalyticsBucket', {
-      bucketName: `frank-analytics-${this.account}`,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      lifecycleRules: [
-        {
-          id: 'archive-old-prompts',
-          prefix: 'prompts/',
-          transitions: [
-            {
-              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-              transitionAfter: cdk.Duration.days(90),
-            },
-          ],
-          expiration: cdk.Duration.days(365),
-        },
-        {
-          id: 'archive-old-feedback',
-          prefix: 'feedback/',
-          transitions: [
-            {
-              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-              transitionAfter: cdk.Duration.days(90),
-            },
-          ],
-          expiration: cdk.Duration.days(365),
-        },
-        {
-          id: 'expire-aggregates',
-          prefix: 'aggregates/',
-          expiration: cdk.Duration.days(730), // 2 years for aggregates
-        },
-      ],
-    });
+    const analyticsBucket = s3.Bucket.fromBucketName(this, 'AnalyticsBucket', `frank-analytics-${this.account}`);
 
     // Task Role with PowerUserAccess for broad AWS permissions
     const taskRole = new iam.Role(this, 'FrankTaskRole', {
