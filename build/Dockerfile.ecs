@@ -171,7 +171,9 @@ RUN chmod +x /usr/local/bin/codex-credential-sync.sh
 COPY build/pnyx-credential-sync.sh /usr/local/bin/pnyx-credential-sync.sh
 RUN chmod +x /usr/local/bin/pnyx-credential-sync.sh
 
-# Copy GitHub App token generator (auto-refreshing auth)
+# Copy GitHub App JWT and token generators (auto-refreshing auth, multi-org support)
+COPY build/github-app-jwt.sh /usr/local/bin/github-app-jwt.sh
+RUN chmod +x /usr/local/bin/github-app-jwt.sh
 COPY build/github-app-token.sh /usr/local/bin/github-app-token.sh
 RUN chmod +x /usr/local/bin/github-app-token.sh
 
