@@ -181,7 +181,7 @@ export class FrankStack extends cdk.Stack {
         ANALYTICS_ENABLED: 'true',
         FEEDBACK_GITHUB_ENABLED: 'true',
         // Clone this repo on container startup
-        GIT_REPO: 'https://github.com/tegryan-ddo/enkai.git',
+        GIT_REPO: 'https://github.com/enkai-inc/enkai.git',
         GIT_BRANCH: 'main',
       },
       secrets: {
