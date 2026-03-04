@@ -24,7 +24,7 @@ export class FrankPipelineStack extends cdk.Stack {
     const pipeline = new CodePipeline(this, 'Pipeline', {
       pipelineName: 'FrankPipeline',
       synth: new ShellStep('Synth', {
-        input: CodePipelineSource.connection('tegryan-ddo/frank', 'main', {
+        input: CodePipelineSource.connection('enkai-inc/frank', 'main', {
           connectionArn: 'arn:aws:codeconnections:us-east-1:882384879235:connection/2b22aa6f-0fe4-47b8-b2a5-d79bf667c362',
         }),
         commands: [
