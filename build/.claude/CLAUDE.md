@@ -83,7 +83,7 @@ codex login --device-auth
 Skills and scripts from community repos are automatically downloaded at container startup. Configured in `build/community-skills.conf`.
 
 Current community repos:
-- **tegryan-ddo/pedro** — Observatory, quality ratchet, scrum, design, and 30+ other skills
+- **enkai-inc/pedro** — Observatory, quality ratchet, scrum, design, and 30+ other skills
 
 Skills are installed to `~/.claude/skills/` and `.claude/scripts/` in the working directory. To add a new community repo, add a line to `build/community-skills.conf`.
 

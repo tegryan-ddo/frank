@@ -424,7 +424,7 @@ install_plugins() {
 # Non-fatal: container should still start even if plugins repo is unavailable
 clone_plugins_repo || echo "WARNING: Continuing without plugins"
 
-# Sync community skills from GitHub repos (e.g., tegryan-ddo/pedro)
+# Sync community skills from GitHub repos (e.g., enkai-inc/pedro)
 source /usr/local/bin/install-community-skills.sh
 sync_community_skills
 
