@@ -120,8 +120,8 @@ export class FrankStack extends cdk.Stack {
 
     // Task Definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FrankTask', {
-      memoryLimitMiB: 8192,
-      cpu: 4096,
+      memoryLimitMiB: 4096,
+      cpu: 2048,
       ephemeralStorageGiB: 50,
       taskRole,
       runtimePlatform: {
