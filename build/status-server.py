@@ -504,7 +504,7 @@ def get_enkai_relay_tick_status():
 # =========================================================================
 
 def get_gh_repo():
-    """Parse GIT_REPO env var to extract owner/repo (e.g. 'tegryan-ddo/enkai')."""
+    """Parse GIT_REPO env var to extract owner/repo (e.g. 'enkai-inc/enkai')."""
     git_repo = os.environ.get('GIT_REPO', '')
     if not git_repo:
         return None
